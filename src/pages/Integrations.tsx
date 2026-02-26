@@ -29,7 +29,7 @@ const IntegrationsPage = () => {
     setConnecting(true);
     const ok = await connectWearable();
     setConnecting(false);
-    if (!ok) toast.error('Apple Health não disponível. Disponível apenas no app iOS.');
+    if (!ok) toast.error('Health Connect não disponível. Requer Android 9+ com Health Connect instalado.');
   };
 
   const handleSync = async () => {
@@ -63,11 +63,11 @@ const IntegrationsPage = () => {
         {/* Apple Health */}
         <div className="rounded-2xl bg-card border border-border p-4">
           <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-pink-500 to-red-500 flex items-center justify-center">
-              <Heart size={20} className="text-white" fill="white" />
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center">
+              <Activity size={20} className="text-white" />
             </div>
             <div className="flex-1">
-              <h3 className="text-sm font-semibold text-foreground">Apple Health</h3>
+              <h3 className="text-sm font-semibold text-foreground">Health Connect</h3>
               <p className="text-xs text-muted-foreground">
                 {isConnected ? 'Conectado' : 'Não conectado'}
               </p>
@@ -116,9 +116,9 @@ const IntegrationsPage = () => {
             <button
               onClick={handleConnect}
               disabled={connecting}
-              className="w-full rounded-xl bg-gradient-to-r from-pink-500 to-red-500 text-white font-medium py-3 text-sm transition-all active:scale-[0.98] disabled:opacity-50"
+              className="w-full rounded-xl bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-medium py-3 text-sm transition-all active:scale-[0.98] disabled:opacity-50"
             >
-              {connecting ? 'Conectando...' : 'Conectar Apple Health'}
+              {connecting ? 'Conectando...' : 'Conectar Health Connect'}
             </button>
           )}
         </div>
@@ -136,7 +136,7 @@ const IntegrationsPage = () => {
               <Info size={20} className="text-muted-foreground" />
             </div>
             <p className="text-xs text-muted-foreground leading-relaxed flex-1">
-              Garmin, Whoop, Oura, Fitbit e demais dispositivos compatíveis serão integrados automaticamente via Apple Health.
+              Garmin, Whoop, Oura, Fitbit e demais dispositivos compatíveis serão integrados automaticamente via Health Connect.
             </p>
           </div>
         </div>
