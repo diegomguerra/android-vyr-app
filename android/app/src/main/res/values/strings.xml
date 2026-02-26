@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">VYR Labs</string>
+    <string name="title_activity_main">VYR Labs</string>
+    <string name="package_name">com.vyrlabs.app.android</string>
+    <string name="custom_url_scheme">com.vyrlabs.app.android</string>
+</resources>
