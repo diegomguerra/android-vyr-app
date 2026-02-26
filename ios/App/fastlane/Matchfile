@@ -1,0 +1,2 @@
+app_identifier("com.vyrlabs.app")
+type("appstore")

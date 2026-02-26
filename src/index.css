@@ -1,0 +1,163 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* VYR Backgrounds */
+    --vyr-bg-primary: 225 14% 6%;
+    --vyr-bg-surface: 223 16% 9%;
+    --vyr-bg-elevated: 222 17% 13%;
+
+    /* VYR Typography */
+    --vyr-text-primary: 220 20% 94%;
+    --vyr-text-secondary: 219 10% 69%;
+    --vyr-text-muted: 218 8% 47%;
+
+    /* VYR Stroke */
+    --vyr-stroke-divider: 225 18% 17%;
+
+    /* VYR Accents */
+    --vyr-accent-action: 220 25% 45%;
+    --vyr-accent-stable: 161 17% 37%;
+    --vyr-accent-transition: 42 32% 42%;
+
+    /* VYR Pillars */
+    --vyr-energia: 211 13% 43%;
+    --vyr-clareza: 214 20% 51%;
+    --vyr-estabilidade: 162 13% 33%;
+
+    /* VYR Semantic */
+    --vyr-positive: 161 17% 37%;
+    --vyr-caution: 42 32% 42%;
+    --vyr-negative: 218 8% 47%;
+
+    /* Shadcn mapping to VYR */
+    --background: 225 14% 6%;
+    --foreground: 220 20% 94%;
+    --card: 223 16% 9%;
+    --card-foreground: 220 20% 94%;
+    --popover: 222 17% 13%;
+    --popover-foreground: 220 20% 94%;
+    --primary: 220 25% 45%;
+    --primary-foreground: 220 20% 94%;
+    --secondary: 223 16% 9%;
+    --secondary-foreground: 219 10% 69%;
+    --muted: 222 17% 13%;
+    --muted-foreground: 218 8% 47%;
+    --accent: 222 17% 13%;
+    --accent-foreground: 220 20% 94%;
+    --destructive: 42 32% 42%;
+    --destructive-foreground: 220 20% 94%;
+    --border: 225 18% 17%;
+    --input: 225 18% 17%;
+    --ring: 220 25% 45%;
+    --radius: 0.75rem;
+
+    --sidebar-background: 225 14% 6%;
+    --sidebar-foreground: 219 10% 69%;
+    --sidebar-primary: 220 25% 45%;
+    --sidebar-primary-foreground: 220 20% 94%;
+    --sidebar-accent: 222 17% 13%;
+    --sidebar-accent-foreground: 220 20% 94%;
+    --sidebar-border: 225 18% 17%;
+    --sidebar-ring: 220 25% 45%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    height: 100%;
+    overflow: hidden;
+    font-family: 'Inter', sans-serif;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    height: 100%;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: none;
+  }
+
+  #root {
+    min-height: 100dvh;
+  }
+}
+
+@layer utilities {
+  .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .safe-area-top {
+    padding-top: max(env(safe-area-inset-top, 0px), 8px);
+  }
+
+  .safe-area-bottom {
+    padding-bottom: max(env(safe-area-inset-bottom, 0px), 8px);
+  }
+
+  .animate-delta-pulse {
+    animation: delta-pulse 2s ease-in-out infinite;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* VYR Animations */
+@keyframes ring-draw {
+  from {
+    stroke-dashoffset: var(--ring-circumference);
+  }
+  to {
+    stroke-dashoffset: var(--ring-target);
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes delta-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+@keyframes spin3d {
+  from { transform: rotateY(0deg); }
+  to { transform: rotateY(360deg); }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.15); }
+}

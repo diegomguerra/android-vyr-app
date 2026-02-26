@@ -1,0 +1,12 @@
+default_platform(:ios)
+
+platform :ios do
+  desc "Build VYR Labs"
+  lane :build do
+    build_app(
+      workspace: "App/App.xcworkspace",
+      scheme: "App",
+      export_method: "app-store"
+    )
+  end
+end

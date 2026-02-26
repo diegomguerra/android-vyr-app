@@ -1,0 +1,4 @@
+#include "App/Pods/Target Support Files/Pods-App/Pods-App.debug.xcconfig"
+// Configuration settings file format documentation can be found at:
+// https://help.apple.com/xcode/#/dev745c5c974
+ENABLE_USER_SCRIPT_SANDBOXING = NO
