@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
     <!-- Health Connect Permissions -->
     <uses-permission android:name="android.permission.health.READ_STEPS"/>
     <uses-permission android:name="android.permission.health.READ_HEART_RATE"/>
@@ -17,9 +16,12 @@
     <uses-permission android:name="android.permission.health.WRITE_BLOOD_PRESSURE"/>
     <uses-permission android:name="android.permission.health.WRITE_VO2_MAX"/>
     <uses-permission android:name="android.permission.health.WRITE_ACTIVE_CALORIES_BURNED"/>
-
     <!-- Internet -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <queries>
+        <package android:name="com.google.android.apps.healthdata" />
+    </queries>
 
     <application
         android:allowBackup="true"
@@ -28,8 +30,6 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
-
-        <!-- Health Connect Intent Filter -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -43,7 +43,16 @@
                 <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
             </intent-filter>
         </activity>
-
+        <activity-alias
+            android:name="ViewPermissionUsageActivity"
+            android:exported="true"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -53,7 +62,5 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
-
     </application>
-
 </manifest>
