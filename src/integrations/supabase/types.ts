@@ -341,26 +341,47 @@ export type Database = {
       }
       participantes: {
         Row: {
+          altura_cm: number | null
+          codigo: string | null
           created_at: string
+          data_nascimento: string | null
           email: string | null
           id: string
           nome: string | null
+          nome_publico: string | null
+          objetivo_principal: string | null
+          peso_kg: number | null
+          sexo: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
+          altura_cm?: number | null
+          codigo?: string | null
           created_at?: string
+          data_nascimento?: string | null
           email?: string | null
           id?: string
           nome?: string | null
+          nome_publico?: string | null
+          objetivo_principal?: string | null
+          peso_kg?: number | null
+          sexo?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
+          altura_cm?: number | null
+          codigo?: string | null
           created_at?: string
+          data_nascimento?: string | null
           email?: string | null
           id?: string
           nome?: string | null
+          nome_publico?: string | null
+          objetivo_principal?: string | null
+          peso_kg?: number | null
+          sexo?: string | null
           updated_at?: string
           user_id?: string
         }
@@ -369,27 +390,36 @@ export type Database = {
       referencias_populacionais: {
         Row: {
           created_at: string
+          faixa_max: number | null
+          faixa_min: number | null
           id: string
           mean: number | null
           metric: string
+          metrica: string | null
           source: string | null
           stddev: number | null
           updated_at: string
         }
         Insert: {
           created_at?: string
+          faixa_max?: number | null
+          faixa_min?: number | null
           id?: string
           mean?: number | null
           metric: string
+          metrica?: string | null
           source?: string | null
           stddev?: number | null
           updated_at?: string
         }
         Update: {
           created_at?: string
+          faixa_max?: number | null
+          faixa_min?: number | null
           id?: string
           mean?: number | null
           metric?: string
+          metrica?: string | null
           source?: string | null
           stddev?: number | null
           updated_at?: string
@@ -549,7 +579,10 @@ export type Database = {
           created_at: string
           enabled: boolean
           id: string
+          last_sync_at: string | null
           provider: string
+          scopes: string[] | null
+          status: string | null
           updated_at: string
           user_id: string
         }
@@ -558,7 +591,10 @@ export type Database = {
           created_at?: string
           enabled?: boolean
           id?: string
+          last_sync_at?: string | null
           provider: string
+          scopes?: string[] | null
+          status?: string | null
           updated_at?: string
           user_id: string
         }
@@ -567,7 +603,10 @@ export type Database = {
           created_at?: string
           enabled?: boolean
           id?: string
+          last_sync_at?: string | null
           provider?: string
+          scopes?: string[] | null
+          status?: string | null
           updated_at?: string
           user_id?: string
         }
