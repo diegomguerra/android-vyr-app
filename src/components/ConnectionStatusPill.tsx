@@ -28,17 +28,17 @@ const ConnectionStatusPill = () => {
     if (!session?.user?.id) return;
 
     const fetch = async () => {
-      const { data } = await supabase
+      const { data } = await (supabase
         .from('user_integrations')
         .select('provider, status, last_sync_at')
         .eq('user_id', session.user.id)
         .eq('status', 'active')
         .limit(1)
-        .maybeSingle();
+        .maybeSingle() as any);
 
       if (data) {
         setWearable({
-          provider: data.provider === 'apple_health' ? 'Apple Health' : data.provider,
+          provider: data.provider === 'apple_health' ? 'Health Connect' : data.provider,
           status: data.status,
           lastSyncAt: data.last_sync_at,
         });

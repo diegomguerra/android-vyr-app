@@ -24,7 +24,7 @@ const SettingsPage = () => {
     if (!user?.id) return;
 
     Promise.all([
-      supabase.from('participantes').select('nome_publico').eq('user_id', user.id).maybeSingle(),
+      (supabase.from('participantes').select('nome_publico').eq('user_id', user.id).maybeSingle() as any),
       supabase.from('ring_daily_data').select('day', { count: 'exact', head: true }).eq('user_id', user.id),
       supabase.from('notification_preferences').select('*').eq('user_id', user.id).maybeSingle(),
     ]).then(([nameRes, baselineRes, notifRes]) => {

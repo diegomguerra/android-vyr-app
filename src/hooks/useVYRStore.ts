@@ -83,10 +83,10 @@ export function useVYRStore() {
         .eq('user_id', userId).eq('day', today),
       supabase.from('daily_reviews').select('id, day, focus_score, clarity_score, energy_score, mood_score, notes')
         .eq('user_id', userId).order('day', { ascending: false }).limit(7),
-      supabase.from('user_integrations').select('provider, status, last_sync_at, scopes')
-        .eq('user_id', userId).eq('provider', 'apple_health').maybeSingle(),
-      supabase.from('participantes').select('nome_publico')
-        .eq('user_id', userId).maybeSingle(),
+      (supabase.from('user_integrations').select('provider, status, last_sync_at, scopes')
+        .eq('user_id', userId).eq('provider', 'apple_health').maybeSingle() as any),
+      (supabase.from('participantes').select('nome_publico')
+        .eq('user_id', userId).maybeSingle() as any),
     ]);
 
     // History
@@ -201,12 +201,12 @@ export function useVYRStore() {
     if (ok) {
       const uid = await requireValidUserId();
       await retryOnAuthErrorLabeled(async () => {
-        const result = await supabase.from('user_integrations').upsert({
+        const result = await (supabase.from('user_integrations') as any).upsert({
           user_id: uid,
           provider: 'apple_health',
           status: 'active',
           scopes: ['heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation', 'bodyTemperature', 'bloodPressureSystolic', 'bloodPressureDiastolic', 'vo2Max', 'activeEnergyBurned'],
-        }, { onConflict: 'user_id,provider' } as any).select();
+        }, { onConflict: 'user_id,provider' }).select();
         return result;
       }, { table: 'user_integrations', operation: 'upsert' });
       await enableHealthKitBackgroundSync();

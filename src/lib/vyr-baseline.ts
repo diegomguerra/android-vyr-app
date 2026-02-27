@@ -81,9 +81,9 @@ export async function calculateBaseline(): Promise<BaselineMetrics> {
  * Population-level baseline fallback from referencias_populacionais
  */
 async function getPopulationBaseline(): Promise<BaselineMetrics> {
-  const { data: refs } = await supabase
+  const { data: refs } = await (supabase
     .from('referencias_populacionais')
-    .select('metrica, faixa_min, faixa_max');
+    .select('metrica, faixa_min, faixa_max') as any);
 
   if (!refs || refs.length === 0) {
     // Hardcoded fallback

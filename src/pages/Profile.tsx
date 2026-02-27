@@ -32,7 +32,7 @@ const Profile = () => {
 
   useEffect(() => {
     if (!user?.id) return;
-    supabase.from('participantes').select('*').eq('user_id', user.id).maybeSingle()
+    (supabase.from('participantes').select('*').eq('user_id', user.id).maybeSingle() as any)
       .then(({ data }) => {
         if (data) {
           setForm({
@@ -67,7 +67,7 @@ const Profile = () => {
       };
 
       await retryOnAuthErrorLabeled(async () => {
-        const result = await supabase.from('participantes').upsert(payload, { onConflict: 'user_id' }).select();
+        const result = await (supabase.from('participantes') as any).upsert(payload, { onConflict: 'user_id' }).select();
         return result;
       }, { table: 'participantes', operation: 'upsert' });
 
