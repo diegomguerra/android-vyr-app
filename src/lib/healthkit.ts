@@ -1,13 +1,14 @@
 /**
- * HealthKit integration via @capgo/capacitor-health (Capacitor 8)
- * + VYRHealthBridge for types not covered by the plugin.
+ * HealthKit / Health Connect integration
+ * Uses a local stub on web; on native builds the stub returns safe defaults.
  */
 
 import { forceRefreshSession, requireValidUserId, retryOnAuthErrorLabeled } from './auth-session';
 import { supabase } from '@/integrations/supabase/client';
 import type { Json } from '@/integrations/supabase/types';
 import { VYRHealthBridge } from './healthkit-bridge';
-import type { HealthDataType, HealthSample } from '@capgo/capacitor-health';
+import { Health } from './capacitor-health-stub';
+import type { HealthDataType, HealthSample } from './capacitor-health-stub';
 
 // Types the @capgo/capacitor-health plugin actually supports
 export const HEALTH_READ_TYPES: HealthDataType[] = [
@@ -40,7 +41,6 @@ export type HealthAuthorizationStatus = 'notDetermined' | 'sharingDenied' | 'sha
 
 async function getAuthorizationStatuses(types: string[]): Promise<Record<string, HealthAuthorizationStatus>> {
   try {
-    const { Health } = await import('@capgo/capacitor-health');
     const pluginTypes = types.filter(t => HEALTH_READ_TYPES.includes(t as HealthDataType)) as HealthDataType[];
     const result = await Health.checkAuthorization({ read: pluginTypes, write: pluginTypes });
     const statuses: Record<string, HealthAuthorizationStatus> = {};
@@ -65,9 +65,9 @@ async function getAuthorizationStatuses(types: string[]): Promise<Record<string,
 
 export async function isHealthKitAvailable(): Promise<boolean> {
   try {
-    const { Health } = await import('@capgo/capacitor-health');
     const result = await Health.isAvailable();
     console.log('[healthkit] isAvailable result:', JSON.stringify(result));
+    return result.available;
     return result.available;
   } catch (e) {
     console.error('[healthkit] isAvailable THREW:', e);
@@ -80,7 +80,6 @@ export async function isHealthKitAvailable(): Promise<boolean> {
 
 export async function requestHealthKitPermissions(): Promise<boolean> {
   try {
-    const { Health } = await import('@capgo/capacitor-health');
     const allTypes = [...new Set([...HEALTH_READ_TYPES, ...HEALTH_WRITE_TYPES])];
     const beforeStatus = await getAuthorizationStatuses([...allTypes, ...BRIDGE_READ_TYPES, ...BRIDGE_ONLY_WRITE_TYPES]);
 
@@ -125,7 +124,6 @@ export async function writeHealthSample(dataType: string, value: number, startDa
 
     // Plugin-supported types
     if (HEALTH_WRITE_TYPES.includes(dataType as HealthDataType)) {
-      const { Health } = await import('@capgo/capacitor-health');
       await Health.saveSample({ dataType: dataType as HealthDataType, value, startDate, endDate: endDate ?? startDate });
       return true;
     }
@@ -267,7 +265,6 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   if (!available) return false;
 
   const userId = await requireValidUserId();
-  const { Health } = await import('@capgo/capacitor-health');
   const now = new Date();
   const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
   const today = now.toISOString().split('T')[0];
