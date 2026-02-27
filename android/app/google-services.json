@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "664114090719",
+    "project_id": "vyr-labs",
+    "storage_bucket": "vyr-labs.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:664114090719:android:daad155d3cb36a1b050f6a",
+        "android_client_info": {
+          "package_name": "io.vyr.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDbzzwvOHOLx8vVhoHynv4zfhPX7WQ25kM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
