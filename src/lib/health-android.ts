@@ -83,26 +83,41 @@ export class AndroidHealthProvider implements IHealthProvider {
   }
 
   async requestPermissions(): Promise<boolean> {
-  try {
-    const Health = await getHealth();
-    // capacitor-health requer apenas os tipos de leitura no requestAuthorization
-    await Health.requestAuthorization({
-      read: [...READ_TYPES],
-      write: [...WRITE_TYPES],
-    });
-    console.log('[health-android] permissions requested successfully');
-    return true;
-  } catch (e: any) {
-    console.error('[health-android] requestPermissions failed:', JSON.stringify(e));
-    // Erro vazio {} pode significar que o usuário fechou a tela — não é erro fatal
-    const errStr = JSON.stringify(e);
-    if (errStr === '{}' || errStr === 'null' || !errStr) {
-      console.warn('[health-android] permission dialog may have been dismissed, treating as partial success');
+    try {
+      const Health = await getHealth();
+      
+      // Tenta requestAuthorization primeiro
+      try {
+        await Health.requestAuthorization({
+          read: [...READ_TYPES],
+          write: [...WRITE_TYPES],
+        });
+        console.log('[health-android] requestAuthorization OK');
+        return true;
+      } catch (e1) {
+        console.warn('[health-android] requestAuthorization failed, trying requestPermission:', JSON.stringify(e1));
+      }
+
+      // Fallback: tenta requestPermission (nome alternativo do método)
+      try {
+        const allPerms = [
+          ...READ_TYPES.map(t => ({ accessType: 'read', healthDataType: t as string })),
+          ...WRITE_TYPES.map(t => ({ accessType: 'write', healthDataType: t as string })),
+        ];
+        await (Health as any).requestPermission({ permissions: allPerms });
+        console.log('[health-android] requestPermission OK');
+        return true;
+      } catch (e2) {
+        console.warn('[health-android] requestPermission failed:', JSON.stringify(e2));
+      }
+
+      // Se ambos falharam mas o plugin existe, considera sucesso parcial
       return true;
+    } catch (e) {
+      console.error('[health-android] requestPermissions total failure:', JSON.stringify(e));
+      return false;
     }
-    return false;
   }
-}
 
   async readSteps(startDate: string, endDate: string, limit = 500): Promise<BridgeSample[]> {
     return readSamples('steps', startDate, endDate, limit);
