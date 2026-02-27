@@ -66,11 +66,19 @@ export class AndroidHealthProvider implements IHealthProvider {
     try {
       const Health = await getHealth();
       const result = await Health.isAvailable();
-      console.log('[health-android] isAvailable:', result);
-      return result?.available ?? false;
+      console.log('[health-android] isAvailable raw result:', JSON.stringify(result));
+      // capacitor-health pode retornar { available: true }, { value: true }, ou apenas true
+      if (typeof result === 'boolean') return result;
+      if (typeof result?.available === 'boolean') return result.available;
+      if (typeof result?.value === 'boolean') return result.value;
+      // Se não jogou erro, considera disponível no Android nativo
+      const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
+      return isNative;
     } catch (e) {
       console.error('[health-android] isAvailable failed:', e);
-      return false;
+      // Fallback: se é nativo Android, tenta mesmo assim
+      const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
+      return isNative;
     }
   }
 
