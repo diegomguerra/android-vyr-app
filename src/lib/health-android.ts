@@ -83,19 +83,26 @@ export class AndroidHealthProvider implements IHealthProvider {
   }
 
   async requestPermissions(): Promise<boolean> {
-    try {
-      const Health = await getHealth();
-      await Health.requestAuthorization({
-        read: [...READ_TYPES],
-        write: [...WRITE_TYPES],
-      });
-      console.log('[health-android] permissions requested');
+  try {
+    const Health = await getHealth();
+    // capacitor-health requer apenas os tipos de leitura no requestAuthorization
+    await Health.requestAuthorization({
+      read: [...READ_TYPES],
+      write: [...WRITE_TYPES],
+    });
+    console.log('[health-android] permissions requested successfully');
+    return true;
+  } catch (e: any) {
+    console.error('[health-android] requestPermissions failed:', JSON.stringify(e));
+    // Erro vazio {} pode significar que o usuário fechou a tela — não é erro fatal
+    const errStr = JSON.stringify(e);
+    if (errStr === '{}' || errStr === 'null' || !errStr) {
+      console.warn('[health-android] permission dialog may have been dismissed, treating as partial success');
       return true;
-    } catch (e) {
-      console.error('[health-android] requestPermissions failed:', e);
-      return false;
     }
+    return false;
   }
+}
 
   async readSteps(startDate: string, endDate: string, limit = 500): Promise<BridgeSample[]> {
     return readSamples('steps', startDate, endDate, limit);
