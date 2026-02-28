@@ -1,4 +1,4 @@
-package com.vyrlabs.app.android;
+﻿package com.vyrlabs.app.android;
 import com.getcapacitor.BridgeActivity;
 import com.vyrlabs.app.android.healthconnect.HealthConnectPlugin;
 public class MainActivity extends BridgeActivity {
