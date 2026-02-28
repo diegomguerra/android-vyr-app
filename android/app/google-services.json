@@ -7,9 +7,9 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:664114090719:android:daad155d3cb36a1b050f6a",
+        "mobilesdk_app_id": "1:664114090719:android:c07cdd6f696e5566050f6a",
         "android_client_info": {
-          "package_name": "io.vyr.app"
+          "package_name": "com.vyrlabs.app.android"
         }
       },
       "oauth_client": [],
