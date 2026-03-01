@@ -1,4 +1,4 @@
-package com.vyrlabs.app.android.healthconnect
+content = """package com.vyrlabs.app.android.healthconnect
 
 import android.util.Log
 import androidx.health.connect.client.HealthConnectClient
@@ -26,7 +26,6 @@ class HealthConnectPlugin : Plugin() {
     companion object {
         private var pendingPermissionCall: PluginCall? = null
 
-        @JvmStatic
         fun onPermissionsResult(granted: Set<String>) {
             val call = pendingPermissionCall ?: return
             pendingPermissionCall = null
@@ -250,3 +249,8 @@ class HealthConnectPlugin : Plugin() {
         }
     }
 }
+"""
+
+with open('android/app/src/main/java/com/vyrlabs/app/android/healthconnect/HealthConnectPlugin.kt', 'w', encoding='utf-8') as f:
+    f.write(content)
+print('Plugin atualizado!')

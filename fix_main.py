@@ -1,4 +1,4 @@
-package com.vyrlabs.app.android;
+main_content = """package com.vyrlabs.app.android;
 
 import android.os.Bundle;
 import androidx.activity.result.ActivityResultLauncher;
@@ -23,3 +23,8 @@ public class MainActivity extends BridgeActivity {
         );
     }
 }
+"""
+
+with open('android/app/src/main/java/com/vyrlabs/app/android/MainActivity.java', 'w', encoding='utf-8') as f:
+    f.write(main_content)
+print('MainActivity atualizado!')
