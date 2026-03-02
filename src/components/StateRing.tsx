@@ -42,9 +42,7 @@ const StateRing = ({ score, stateLabel, level }: StateRingProps) => {
         <defs>
           <filter id="glow-breathe" x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur1" />
-            <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="3" seed="2" result="noise">
-              <animate attributeName="seed" values="2;8;3;11;5;2" dur="5s" repeatCount="indefinite" />
-            </feTurbulence>
+            <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="3" seed="2" result="noise" />
             <feDisplacementMap in="blur1" in2="noise" scale="18" xChannelSelector="R" yChannelSelector="G" result="displaced" />
             <feGaussianBlur in="displaced" stdDeviation="3" result="softGlow" />
             <feComposite in="softGlow" in2="SourceGraphic" operator="over" />
