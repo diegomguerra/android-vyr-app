@@ -291,10 +291,10 @@ class HealthConnectPlugin : Plugin() {
                             SleepSessionRecord.STAGE_TYPE_REM -> "rem"
                             SleepSessionRecord.STAGE_TYPE_LIGHT -> "light"
                             SleepSessionRecord.STAGE_TYPE_AWAKE -> "awake"
-                            SleepSessionRecord.STAGE_TYPE_SLEEPING -> "asleep"
+                            SleepSessionRecord.STAGE_TYPE_SLEEPING -> "light"
                             SleepSessionRecord.STAGE_TYPE_OUT_OF_BED -> "awake"
                             SleepSessionRecord.STAGE_TYPE_AWAKE_IN_BED -> "inBed"
-                            else -> "asleep"
+                            else -> "light"
                         })
                         samples.put(st)
                     }

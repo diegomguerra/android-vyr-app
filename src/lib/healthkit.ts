@@ -3,6 +3,10 @@ import { supabase } from '@/integrations/supabase/client';
 import type { Json } from '@/integrations/supabase/types';
 import { getPlatform } from './health-provider';
 import type { IHealthProvider, SleepSample } from './health-provider';
+import { computeState } from './vyr-engine';
+import type { BiometricData } from './vyr-engine';
+import { calculateBaseline } from './vyr-baseline';
+import { getLocalToday } from './date-utils';
 
 let _provider: IHealthProvider | null = null;
 
@@ -121,8 +125,9 @@ export function calculateSleepQuality(samples: SleepSample[]): { durationHours: 
 }
 
 export function convertHRVtoScale(hrvMs: number): number {
-  if (hrvMs <= 0) return 0;
-  return Math.min(100, Math.round((Math.log(hrvMs) / Math.log(200)) * 100));
+  if (hrvMs < 1) return 0;
+  const clamped = Math.min(hrvMs, 200);
+  return Math.max(0, Math.min(100, Math.round((Math.log(clamped) / Math.log(200)) * 100)));
 }
 
 /** Derive resting heart rate from general HR samples by taking the lowest 20% average */
@@ -209,10 +214,13 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   if (!available) return false;
   const userId = await requireValidUserId();
   const provider = await getProvider();
+
+  // Use local date for the day key and local midnight for the start window
+  const today = getLocalToday();
   const now = new Date();
-  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-  const today = now.toISOString().split('T')[0];
-  const startDate = yesterday.toISOString();
+  // Start from local midnight yesterday (covers overnight sleep)
+  const localMidnightYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0);
+  const startDate = localMidnightYesterday.toISOString();
   const endDate = now.toISOString();
 
   const [sleepSamples, stepsSamples, hrSamples, rhrSamples, hrvSamples, spo2Samples, rrSamples] = await Promise.all([
@@ -225,6 +233,7 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     provider.readRespiratoryRate(startDate, endDate).catch(() => []),
   ]);
 
+  console.info('[healthkit] sync window:', { startDate, endDate, today });
   console.info('[healthkit] sync samples count', {
     sleep: sleepSamples.length, steps: stepsSamples.length,
     hr: hrSamples.length, rhr: rhrSamples.length, hrv: hrvSamples.length,
@@ -234,17 +243,19 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
 
   const { durationHours, quality: sleepQuality } = calculateSleepQuality(sleepSamples);
   const totalSteps = stepsSamples.map(s => s.value).reduce((a, b) => a + b, 0);
-  const numAvg = (samples: { value: number }[]) => {
-    const vals = samples.map(s => s.value).filter(v => !isNaN(v) && v > 0);
+
+  // Average for biometric values (filter NaN only, allow zeros for steps)
+  const bioAvg = (samples: { value: number }[], minVal = 0) => {
+    const vals = samples.map(s => s.value).filter(v => !isNaN(v) && v >= minVal);
     return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : undefined;
   };
 
   // Use dedicated metrics if available, otherwise derive from general HR samples
-  const avgHr = numAvg(hrSamples);
-  const avgRhr = numAvg(rhrSamples) ?? deriveRHR(hrSamples);
-  const avgHrv = numAvg(hrvSamples) ?? derivePseudoHRV(hrSamples);
-  const avgSpo2 = numAvg(spo2Samples);
-  const avgRR = numAvg(rrSamples);
+  const avgHr = bioAvg(hrSamples, 30);   // HR must be >= 30 bpm
+  const avgRhr = bioAvg(rhrSamples, 30) ?? deriveRHR(hrSamples);
+  const avgHrv = bioAvg(hrvSamples, 1) ?? derivePseudoHRV(hrSamples);  // HRV must be >= 1ms
+  const avgSpo2 = bioAvg(spo2Samples, 50); // SpO2 must be >= 50%
+  const avgRR = bioAvg(rrSamples, 5);      // RR must be >= 5 breaths/min
 
   // Derive stress level from HRV (lower HRV = higher stress, scale 0-100)
   const stressLevel = avgHrv != null ? Math.max(0, Math.min(100, Math.round(100 - convertHRVtoScale(avgHrv)))) : null;
@@ -266,6 +277,7 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
 
   const sourceProvider = provider.getSourceProvider();
 
+  // 1. Upsert ring_daily_data
   const result = await retryOnAuthErrorLabeled(async () => {
     const res = await supabase.from('ring_daily_data').upsert(
       [{ user_id: userId, day: today, source_provider: sourceProvider, metrics: metrics as unknown as Json }],
@@ -276,6 +288,7 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
 
   if (result.error) return false;
 
+  // 2. Update integration status
   await retryOnAuthErrorLabeled(async () => {
     const res = await (supabase.from('user_integrations') as any).upsert(
       [{ user_id: userId, provider: sourceProvider, status: 'connected', last_sync_at: new Date().toISOString() }],
@@ -283,6 +296,59 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     ).select();
     return { data: res.data, error: res.error ? { code: (res.error as any).code, message: res.error.message } : null };
   }, { table: 'user_integrations', operation: 'upsert' });
+
+  // 3. Auto-compute VYR state from biometric data
+  try {
+    const biometricData: BiometricData = {
+      rhr: metrics.rhr ?? undefined,
+      sleepDuration: metrics.sleep_duration_hours || undefined,
+      sleepQuality: metrics.sleep_quality || undefined,
+      spo2: metrics.spo2 ?? undefined,
+      hrvRawMs: metrics.hrv_sdnn ?? undefined,
+      hrvIndex: metrics.hrv_index ?? undefined,
+      stressLevel: metrics.stress_level ?? undefined,
+    };
+
+    // Preserve existing subjective data if already in computed_states
+    const { data: existing } = await (supabase
+      .from('computed_states')
+      .select('raw_input')
+      .eq('user_id', userId)
+      .eq('day', today)
+      .maybeSingle() as any);
+
+    const existingInput = (existing?.raw_input ?? {}) as Record<string, any>;
+    const mergedData: BiometricData = {
+      ...biometricData,
+      subjectiveEnergy: existingInput.subjectiveEnergy,
+      subjectiveClarity: existingInput.subjectiveClarity,
+      subjectiveFocus: existingInput.subjectiveFocus,
+      subjectiveStability: existingInput.subjectiveStability,
+    };
+
+    const baseline = await calculateBaseline();
+    const vyrState = computeState(mergedData, baseline);
+
+    console.info('[healthkit] auto-computed VYR state:', vyrState);
+
+    await retryOnAuthErrorLabeled(async () => {
+      const res = await (supabase.from('computed_states') as any).upsert(
+        [{
+          user_id: userId,
+          day: today,
+          score: vyrState.score,
+          level: vyrState.level,
+          phase: vyrState.phase,
+          pillars: vyrState.pillars as unknown as Json,
+          raw_input: mergedData as unknown as Json,
+        }],
+        { onConflict: 'user_id,day' }
+      ).select();
+      return { data: res.data, error: res.error ? { code: (res.error as any).code, message: res.error.message } : null };
+    }, { table: 'computed_states', operation: 'upsert' });
+  } catch (e) {
+    console.error('[healthkit] auto-compute VYR state failed:', e);
+  }
 
   const nowIso = now.toISOString();
   for (const dt of [...HEALTH_READ_TYPES, ...BRIDGE_READ_TYPES]) {

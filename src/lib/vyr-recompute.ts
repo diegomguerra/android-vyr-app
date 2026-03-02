@@ -39,15 +39,15 @@ export async function recomputeStateWithPerceptions(subjective: SubjectiveInput)
 
     const rawInput = (existing?.raw_input ?? {}) as Record<string, any>;
 
-    // Merge biometric + subjective
+    // Merge biometric + subjective (handle both camelCase keys from auto-compute and legacy keys)
     const biometricData: BiometricData = {
       rhr: rawInput.rhr,
-      sleepDuration: rawInput.sleepDuration,
-      sleepQuality: rawInput.sleepQuality,
+      sleepDuration: rawInput.sleepDuration ?? rawInput.sleep_duration_hours,
+      sleepQuality: rawInput.sleepQuality ?? rawInput.sleep_quality,
       spo2: rawInput.spo2,
-      hrvIndex: rawInput.hrvIndex,
-      hrvRawMs: rawInput.hrvRawMs,
-      stressLevel: rawInput.stressLevel,
+      hrvIndex: rawInput.hrvIndex ?? rawInput.hrv_index,
+      hrvRawMs: rawInput.hrvRawMs ?? rawInput.hrv_sdnn,
+      stressLevel: rawInput.stressLevel ?? rawInput.stress_level,
     };
 
     // Attach subjective scores as extra metadata (not part of BiometricData interface)
