@@ -39,6 +39,17 @@ const StateRing = ({ score, stateLabel, level }: StateRingProps) => {
         className="transform"
         style={{ transform: 'rotate(-225deg)' }}
       >
+        <defs>
+          <filter id="glow-breathe" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur1" />
+            <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="3" seed="2" result="noise">
+              <animate attributeName="seed" values="2;8;3;11;5;2" dur="5s" repeatCount="indefinite" />
+            </feTurbulence>
+            <feDisplacementMap in="blur1" in2="noise" scale="18" xChannelSelector="R" yChannelSelector="G" result="displaced" />
+            <feGaussianBlur in="displaced" stdDeviation="3" result="softGlow" />
+            <feComposite in="softGlow" in2="SourceGraphic" operator="over" />
+          </filter>
+        </defs>
         {/* Track */}
         <circle
           cx={size / 2}
@@ -50,7 +61,21 @@ const StateRing = ({ score, stateLabel, level }: StateRingProps) => {
           strokeDasharray={`${arcLength} ${circumference}`}
           strokeLinecap="round"
         />
-        {/* Progress */}
+        {/* Glow layer */}
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke={getScoreColor(score)}
+          strokeWidth={stroke + 4}
+          strokeDasharray={`${arcLength} ${circumference}`}
+          strokeDashoffset={dashOffset}
+          strokeLinecap="round"
+          filter="url(#glow-breathe)"
+          className="animate-breathe-opacity"
+        />
+        {/* Progress (crisp) */}
         <circle
           ref={circleRef}
           cx={size / 2}
@@ -61,8 +86,6 @@ const StateRing = ({ score, stateLabel, level }: StateRingProps) => {
           strokeWidth={stroke}
           strokeDasharray={`${arcLength} ${circumference}`}
           strokeLinecap="round"
-          className="animate-breathe"
-          style={{ '--breathe-color': getScoreColor(score) } as React.CSSProperties}
         />
       </svg>
       {/* Center content */}
