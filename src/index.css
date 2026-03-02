@@ -168,3 +168,18 @@
   0%, 100% { filter: brightness(1); }
   50% { filter: brightness(1.15); }
 }
+
+@keyframes breathe {
+  0%, 100% {
+    opacity: 1;
+    filter: drop-shadow(0 0 12px currentColor);
+  }
+  50% {
+    opacity: 0.72;
+    filter: drop-shadow(0 0 20px currentColor);
+  }
+}
+
+.animate-breathe {
+  animation: breathe 4s ease-in-out infinite;
+}
