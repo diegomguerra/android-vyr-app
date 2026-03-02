@@ -48,11 +48,13 @@ const HistoryTab = () => {
       .like('action_type', 'perception_%')
       .then(({ data }) => {
         if (!data) return;
-        const perceptions: PhasePerception[] = data.map((row: any) => ({
-          day: row.day,
-          phase: row.action_type.replace('perception_', ''),
-          values: row.payload?.values ?? { foco: 0, clareza: 0, energia: 0, estabilidade: 0 },
-        }));
+        const perceptions: PhasePerception[] = data
+          .map((row: any) => ({
+            day: row.day,
+            phase: row.action_type.replace('perception_', '').toUpperCase(),
+            values: row.payload?.values ?? { foco: 0, clareza: 0, energia: 0, estabilidade: 0 },
+          }))
+          .filter((p) => ['BOOT', 'HOLD', 'CLEAR'].includes(p.phase));
         setPhasePerceptions(perceptions);
       });
   }, [session?.user?.id, historyByDay]);
