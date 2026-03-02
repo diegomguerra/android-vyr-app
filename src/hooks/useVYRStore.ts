@@ -240,8 +240,9 @@ export function useVYRStore() {
     const ok = await runIncrementalHealthSync('manual');
     if (ok) {
       setWearableConnection((prev) => prev ? { ...prev, lastSyncAt: new Date().toISOString() } : prev);
-      await loadData();
     }
+    // Always reload data after sync attempt to pick up any updates
+    await loadData();
     return ok;
   }, [loadData]);
 

@@ -5,9 +5,9 @@ import type { PhasePerceptionValues } from '@/lib/vyr-recompute';
 import { toast } from 'sonner';
 
 const phaseConfig: Record<string, { label: string; desc: string; colorVar: string; color: string }> = {
-  BOOT: { label: 'BOOT', desc: 'Manhã · Ativação (05h–11h)', colorVar: '--vyr-accent-action', color: '#556B8A' },
-  HOLD: { label: 'HOLD', desc: 'Tarde · Sustentação (11h–17h)', colorVar: '--vyr-accent-transition', color: '#8F7A4A' },
-  CLEAR: { label: 'CLEAR', desc: 'Noite · Recuperação (17h–22h)', colorVar: '--vyr-accent-stable', color: '#4F6F64' },
+  BOOT: { label: 'BOOT', desc: 'Manhã · Ativação (05h–11h59)', colorVar: '--vyr-accent-action', color: '#556B8A' },
+  HOLD: { label: 'HOLD', desc: 'Tarde · Sustentação (12h–17h59)', colorVar: '--vyr-accent-transition', color: '#8F7A4A' },
+  CLEAR: { label: 'CLEAR', desc: 'Noite · Recuperação (18h–22h)', colorVar: '--vyr-accent-stable', color: '#4F6F64' },
 };
 
 const sliders = [

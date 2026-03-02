@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Heart, Activity, Info, Check, RefreshCw, Unplug } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { useNavigate } from 'react-router-dom';
@@ -22,20 +22,43 @@ const IntegrationsPage = () => {
   const { wearableConnection, connectWearable, disconnectWearable, syncWearable } = useVYRStore();
   const [syncing, setSyncing] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const isConnected = wearableConnection?.status === 'active' || wearableConnection?.status === 'connected';
+
+  // Auto-sync when entering the page if connected
+  useEffect(() => {
+    if (!isConnected) return;
+    let cancelled = false;
+    const autoSync = async () => {
+      setSyncing(true);
+      await syncWearable();
+      if (!cancelled) {
+        setSyncing(false);
+        setRefreshKey((k) => k + 1);
+      }
+    };
+    autoSync();
+    return () => { cancelled = true; };
+  }, []); // Only on mount
 
   const handleConnect = async () => {
     setConnecting(true);
     const ok = await connectWearable();
     setConnecting(false);
-    if (!ok) toast.error('Health Connect não disponível. Requer Android 9+ com Health Connect instalado.');
+    if (ok) {
+      setRefreshKey((k) => k + 1);
+    } else {
+      toast.error('Health Connect não disponível. Requer Android 9+ com Health Connect instalado.');
+    }
   };
 
   const handleSync = async () => {
     setSyncing(true);
     const ok = await syncWearable();
     setSyncing(false);
+    // Always refresh biomarker card after sync attempt
+    setRefreshKey((k) => k + 1);
     if (ok) toast.success('Dados sincronizados');
     else toast.error('Falha na sincronização');
   };
@@ -43,6 +66,7 @@ const IntegrationsPage = () => {
   const handleDisconnect = async () => {
     await disconnectWearable();
     toast.success('Desconectado');
+    setRefreshKey((k) => k + 1);
   };
 
   const lastSync = wearableConnection?.lastSyncAt
@@ -124,7 +148,7 @@ const IntegrationsPage = () => {
         </div>
 
         {/* Biomarker data */}
-        {isConnected && <BiomarkerDataCard />}
+        {isConnected && <BiomarkerDataCard refreshKey={refreshKey} />}
 
         {/* J-Style Ring X3 */}
         <WearableModule />

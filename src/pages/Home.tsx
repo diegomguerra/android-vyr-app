@@ -1,6 +1,6 @@
 import { useMemo, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { TrendingUp, TrendingDown, Minus, ChevronRight, Play, Activity } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus, ChevronRight, Play, Activity, Check } from 'lucide-react';
 import StateRing from '@/components/StateRing';
 import PillarRing from '@/components/PillarRing';
 import ContextCard from '@/components/ContextCard';
@@ -17,6 +17,7 @@ import BrainLogo from '@/components/BrainLogo';
 import { interpret } from '@/lib/vyr-interpreter';
 import { useVYRStore } from '@/hooks/useVYRStore';
 import { getLocalToday } from '@/lib/date-utils';
+import { isWithinProtocolWindow, isPhaseActive, getPhaseTimeWindow, getCurrentPhase } from '@/lib/vyr-engine';
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -25,10 +26,10 @@ function getGreeting(): string {
   return 'Boa noite';
 }
 
-const phaseConfig = {
-  BOOT: { label: 'BOOT', colorVar: '--vyr-accent-action', color: '#556B8A', desc: 'Ativação cognitiva', actionLabel: 'Clique ao tomar BOOT' },
-  HOLD: { label: 'HOLD', colorVar: '--vyr-accent-transition', color: '#8F7A4A', desc: 'Sustentação cognitiva', actionLabel: 'Clique ao tomar HOLD' },
-  CLEAR: { label: 'CLEAR', colorVar: '--vyr-accent-stable', color: '#4F6F64', desc: 'Recuperação cognitiva', actionLabel: 'Clique ao tomar CLEAR' },
+const phaseConfig: Record<string, { label: string; colorVar: string; color: string; desc: string; actionLabel: string }> = {
+  BOOT: { label: 'BOOT', colorVar: '--vyr-accent-action', color: '#556B8A', desc: 'Ativação cognitiva (05h–11h59)', actionLabel: 'Clique ao tomar BOOT' },
+  HOLD: { label: 'HOLD', colorVar: '--vyr-accent-transition', color: '#8F7A4A', desc: 'Sustentação cognitiva (12h–17h59)', actionLabel: 'Clique ao tomar HOLD' },
+  CLEAR: { label: 'CLEAR', colorVar: '--vyr-accent-stable', color: '#4F6F64', desc: 'Recuperação cognitiva (18h–22h)', actionLabel: 'Clique ao tomar CLEAR' },
 };
 
 const Home = () => {
@@ -64,15 +65,16 @@ const Home = () => {
 
   const handleConfirmSachet = useCallback(async () => {
     try {
-      await store.logAction(state.phase);
+      const currentPhase = getCurrentPhase();
+      await store.logAction(currentPhase);
       // Dismiss the store's sachet confirmation, we'll use our own flow
       store.dismissConfirmation();
       // Open perception modal for this phase
-      setPerceptionModal({ show: true, phase: state.phase });
+      setPerceptionModal({ show: true, phase: currentPhase });
     } catch (err) {
       console.error('[home] Failed to log action:', err);
     }
-  }, [state.phase, store]);
+  }, [store]);
 
   const handlePerceptionSave = useCallback(async (phase: string, values: { foco: number; clareza: number; energia: number; estabilidade: number }) => {
     await logPerception(phase, values);
@@ -213,31 +215,84 @@ const Home = () => {
               onStartTransition={store.activateTransition}
             />
 
-            {/* 10. Ação Principal */}
-            <div className="rounded-2xl bg-card border border-border p-4">
-              <h3 className="text-xs uppercase tracking-[0.15em] text-muted-foreground font-medium mb-1">
-                Protocolo {phase.label}
-              </h3>
-              <p className="text-xs text-muted-foreground mb-3">{phase.desc}. Registre quando tomar o sachet desta fase.</p>
-            </div>
+            {/* 10. Ação Principal — Protocol CTA */}
+            {(() => {
+              const currentPhase = getCurrentPhase();
+              const currentConfig = phaseConfig[currentPhase];
+              const doseRegistered = actionsTaken.includes(currentPhase);
+              const perceptionRegistered = perceptionsDone.includes(currentPhase);
+              const phaseComplete = doseRegistered && perceptionRegistered;
+              const inWindow = isWithinProtocolWindow();
 
-            <button
-              onClick={handleConfirmSachet}
-              className="w-full rounded-xl py-4 flex flex-col items-center gap-1 text-sm font-medium text-foreground transition-transform active:scale-[0.98]"
-              style={{
-                background: phase.color,
-                boxShadow: `0 4px 20px -4px ${phase.color}66`,
-              }}
-            >
-              <div className="flex items-center gap-2">
-                <Play size={16} fill="currentColor" />
-                <span>Protocolo {phase.label}</span>
-              </div>
-              <span className="text-[10px] opacity-70">{phase.actionLabel}</span>
-            </button>
-            <p className="text-[10px] text-muted-foreground text-center -mt-2">
-              Registre aqui quando tomar o sachet da fase {phase.label}.
-            </p>
+              if (!inWindow) {
+                // Outside 5-22h — no protocol
+                return (
+                  <div className="rounded-2xl bg-card border border-border p-4 text-center">
+                    <p className="text-xs text-muted-foreground">Protocolo disponível entre 05h e 22h.</p>
+                  </div>
+                );
+              }
+
+              if (phaseComplete) {
+                // Current phase done — show next phase info
+                const nextPhases = { BOOT: 'HOLD', HOLD: 'CLEAR', CLEAR: null } as const;
+                const next = nextPhases[currentPhase as keyof typeof nextPhases];
+                if (next) {
+                  const nextWindow = getPhaseTimeWindow(next);
+                  return (
+                    <div className="rounded-2xl bg-card border border-border p-4 text-center space-y-1">
+                      <div className="flex items-center justify-center gap-2">
+                        <Check size={16} style={{ color: currentConfig.color }} />
+                        <span className="text-sm font-medium text-foreground">{currentPhase} registrado</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Próxima fase: <span className="font-medium text-foreground">{next}</span> a partir das {nextWindow.label.split('–')[0]}
+                      </p>
+                    </div>
+                  );
+                }
+                // CLEAR done — all phases complete
+                return (
+                  <div className="rounded-2xl bg-card border border-border p-4 text-center space-y-1">
+                    <div className="flex items-center justify-center gap-2">
+                      <Check size={16} style={{ color: currentConfig.color }} />
+                      <span className="text-sm font-medium text-foreground">Protocolo do dia completo</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">Todas as fases foram registradas.</p>
+                  </div>
+                );
+              }
+
+              // Show CTA for current phase
+              return (
+                <>
+                  <div className="rounded-2xl bg-card border border-border p-4">
+                    <h3 className="text-xs uppercase tracking-[0.15em] text-muted-foreground font-medium mb-1">
+                      Protocolo {currentConfig.label}
+                    </h3>
+                    <p className="text-xs text-muted-foreground mb-3">{currentConfig.desc}. Registre quando tomar o sachet desta fase.</p>
+                  </div>
+
+                  <button
+                    onClick={handleConfirmSachet}
+                    className="w-full rounded-xl py-4 flex flex-col items-center gap-1 text-sm font-medium text-foreground transition-transform active:scale-[0.98]"
+                    style={{
+                      background: currentConfig.color,
+                      boxShadow: `0 4px 20px -4px ${currentConfig.color}66`,
+                    }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Play size={16} fill="currentColor" />
+                      <span>Protocolo {currentConfig.label}</span>
+                    </div>
+                    <span className="text-[10px] opacity-70">{currentConfig.actionLabel}</span>
+                  </button>
+                  <p className="text-[10px] text-muted-foreground text-center -mt-2">
+                    Registre aqui quando tomar o sachet da fase {currentConfig.label}.
+                  </p>
+                </>
+              );
+            })()}
           </>
         )}
       </div>

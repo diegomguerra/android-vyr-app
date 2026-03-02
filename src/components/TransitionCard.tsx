@@ -17,7 +17,7 @@ function getSuggestedTransition(state: VYRState, actionsTaken: string[]): Transi
   const { phase, score, pillars } = state;
   const hour = new Date().getHours();
 
-  if (phase === 'BOOT' && hour >= 8) {
+  if (phase === 'BOOT' && hour >= 10) {
     if (pillars.estabilidade <= 3 || pillars.energia <= 3) {
       return {
         available: true,
@@ -37,7 +37,7 @@ function getSuggestedTransition(state: VYRState, actionsTaken: string[]): Transi
     }
   }
 
-  if (phase === 'CLEAR' && hour >= 5 && hour < 11) {
+  if (phase === 'CLEAR' && hour >= 5 && hour < 12) {
     if (score >= 65 && pillars.energia >= 3.5) {
       return {
         available: true,

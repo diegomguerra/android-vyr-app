@@ -13,6 +13,11 @@ export interface BiometricData {
   stressLevel?: number;   // 0-100
   tempDeviation?: number; // °C deviation from baseline
   activityLevel?: 'high' | 'moderate' | 'low' | null;
+  // Subjective perceptions from daily_reviews (0-10 scale)
+  subjectiveEnergy?: number;
+  subjectiveClarity?: number;
+  subjectiveFocus?: number;
+  subjectiveStability?: number;
 }
 
 export interface PillarScore {
@@ -72,6 +77,10 @@ export function validateWearableData(data: BiometricData): BiometricData {
     stressLevel: data.stressLevel != null ? clamp(data.stressLevel, 0, 100) : undefined,
     spo2: data.spo2 != null ? clamp(data.spo2, 70, 100) : undefined,
     tempDeviation: data.tempDeviation != null ? clamp(data.tempDeviation, -4, 4) : undefined,
+    subjectiveEnergy: data.subjectiveEnergy != null ? clamp(data.subjectiveEnergy, 0, 10) : undefined,
+    subjectiveClarity: data.subjectiveClarity != null ? clamp(data.subjectiveClarity, 0, 10) : undefined,
+    subjectiveFocus: data.subjectiveFocus != null ? clamp(data.subjectiveFocus, 0, 10) : undefined,
+    subjectiveStability: data.subjectiveStability != null ? clamp(data.subjectiveStability, 0, 10) : undefined,
   };
 }
 
@@ -123,6 +132,11 @@ export function computePillars(data: BiometricData, baseline?: BaselineValues): 
     energiaInputs.push({ value: zToPillar(zScore(validated.spo2, bl.spo2.mean, bl.spo2.std)), weight: 0.4 });
   }
 
+  // Subjective energy perception (0-10 → z-score against mean=5, std=2)
+  if (validated.subjectiveEnergy != null) {
+    energiaInputs.push({ value: zToPillar(zScore(validated.subjectiveEnergy, 5, 2)), weight: 0.6 });
+  }
+
   let energia = dynamicWeightedAvg(energiaInputs, 2.5, 3.0);
   // Activity adjustment
   if (validated.activityLevel === 'high') energia = clamp(energia - 0.5, 0, 5);
@@ -143,6 +157,13 @@ export function computePillars(data: BiometricData, baseline?: BaselineValues): 
     const awkZ = zScore(validated.awakenings, 3, 2);
     clarezaInputs.push({ value: zToPillar(-awkZ), weight: 0.5 });
   }
+  // Subjective clarity + focus perceptions (0-10 → z-score against mean=5, std=2)
+  if (validated.subjectiveClarity != null) {
+    clarezaInputs.push({ value: zToPillar(zScore(validated.subjectiveClarity, 5, 2)), weight: 0.5 });
+  }
+  if (validated.subjectiveFocus != null) {
+    clarezaInputs.push({ value: zToPillar(zScore(validated.subjectiveFocus, 5, 2)), weight: 0.5 });
+  }
 
   const clareza = dynamicWeightedAvg(clarezaInputs, 2.5, 3.0);
 
@@ -160,6 +181,10 @@ export function computePillars(data: BiometricData, baseline?: BaselineValues): 
     // Absolute deviation = instability
     const tempZ = zScore(Math.abs(validated.tempDeviation), 0.2, 0.3);
     estabInputs.push({ value: zToPillar(-tempZ), weight: 0.3 });
+  }
+  // Subjective stability perception (0-10 → z-score against mean=5, std=2)
+  if (validated.subjectiveStability != null) {
+    estabInputs.push({ value: zToPillar(zScore(validated.subjectiveStability, 5, 2)), weight: 0.5 });
   }
 
   const estabilidade = dynamicWeightedAvg(estabInputs, 2.0, 3.0);
@@ -194,9 +219,32 @@ export function getLimitingFactor(pillars: PillarScore): string {
 
 export function getCurrentPhase(): 'BOOT' | 'HOLD' | 'CLEAR' {
   const hour = new Date().getHours();
-  if (hour >= 5 && hour < 11) return 'BOOT';
-  if (hour >= 11 && hour < 17) return 'HOLD';
+  if (hour >= 5 && hour < 12) return 'BOOT';
+  if (hour >= 12 && hour < 18) return 'HOLD';
   return 'CLEAR';
+}
+
+/** Check if current time is within any active protocol window (5h-22h) */
+export function isWithinProtocolWindow(): boolean {
+  const hour = new Date().getHours();
+  return hour >= 5 && hour < 22;
+}
+
+/** Get the time window description for a phase */
+export function getPhaseTimeWindow(phase: string): { start: number; end: number; label: string } {
+  switch (phase) {
+    case 'BOOT': return { start: 5, end: 12, label: '05h–11h59' };
+    case 'HOLD': return { start: 12, end: 18, label: '12h–17h59' };
+    case 'CLEAR': return { start: 18, end: 22, label: '18h–22h' };
+    default: return { start: 5, end: 22, label: '05h–22h' };
+  }
+}
+
+/** Check if a specific phase is currently in its time window */
+export function isPhaseActive(phase: string): boolean {
+  const hour = new Date().getHours();
+  const window = getPhaseTimeWindow(phase);
+  return hour >= window.start && hour < window.end;
 }
 
 /**
@@ -234,19 +282,19 @@ export function getRecommendedAction(pillars: PillarScore, score: number, action
   if (score < 45 || pillars.energia <= 2 || pillars.estabilidade <= 2) return 'CLEAR';
 
   // Morning
-  if (hour >= 5 && hour < 11) {
+  if (hour >= 5 && hour < 12) {
     if (!actionsTaken.includes('BOOT') && (pillars.energia >= 3.5 || score >= 65)) return 'BOOT';
     if (actionsTaken.includes('BOOT')) return 'HOLD';
   }
 
   // Afternoon
-  if (hour >= 11 && hour < 17) {
+  if (hour >= 12 && hour < 18) {
     if (score >= 55 && !actionsTaken.includes('HOLD')) return 'HOLD';
     if (actionsTaken.includes('HOLD')) return 'CLEAR';
   }
 
   // Evening
-  if (hour >= 17) return 'CLEAR';
+  if (hour >= 18) return 'CLEAR';
 
   // Fallback
   if (score >= 65) return 'BOOT';
