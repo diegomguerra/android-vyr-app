@@ -227,6 +227,33 @@ class HealthConnectPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun readRespiratoryRate(call: PluginCall) {
+        val startDate = call.getString("startDate") ?: return call.reject("missing startDate")
+        val endDate = call.getString("endDate") ?: return call.reject("missing endDate")
+        scope.launch {
+            try {
+                val client = getClient()
+                val filter = TimeRangeFilter.between(Instant.parse(startDate), Instant.parse(endDate))
+                val response = client.readRecords(ReadRecordsRequest(RespiratoryRateRecord::class, filter))
+                val samples = JSArray()
+                for (r in response.records) {
+                    val s = JSObject()
+                    s.put("value", r.rate)
+                    s.put("startDate", r.time.toString())
+                    s.put("endDate", r.time.toString())
+                    samples.put(s)
+                }
+                val ret = JSObject()
+                ret.put("samples", samples)
+                call.resolve(ret)
+            } catch (e: Exception) {
+                Log.e(TAG, "readRespiratoryRate error", e)
+                call.reject(e.message)
+            }
+        }
+    }
+
+    @PluginMethod
     fun readSleep(call: PluginCall) {
         val startDate = call.getString("startDate") ?: return call.reject("missing startDate")
         val endDate = call.getString("endDate") ?: return call.reject("missing endDate")
@@ -237,12 +264,34 @@ class HealthConnectPlugin : Plugin() {
                 val response = client.readRecords(ReadRecordsRequest(SleepSessionRecord::class, filter))
                 val samples = JSArray()
                 for (r in response.records) {
-                    val s = JSObject()
-                    s.put("value", 0)
-                    s.put("startDate", r.startTime.toString())
-                    s.put("endDate", r.endTime.toString())
-                    samples.put(s)
+                    // Add overall session
+                    val session = JSObject()
+                    session.put("value", 0)
+                    session.put("startDate", r.startTime.toString())
+                    session.put("endDate", r.endTime.toString())
+                    session.put("sleepState", "asleep")
+                    samples.put(session)
+
+                    // Add individual sleep stages (deep, rem, light, awake)
+                    for (stage in r.stages) {
+                        val st = JSObject()
+                        st.put("value", 0)
+                        st.put("startDate", stage.startTime.toString())
+                        st.put("endDate", stage.endTime.toString())
+                        st.put("sleepState", when (stage.stage) {
+                            SleepSessionRecord.STAGE_TYPE_DEEP -> "deep"
+                            SleepSessionRecord.STAGE_TYPE_REM -> "rem"
+                            SleepSessionRecord.STAGE_TYPE_LIGHT -> "light"
+                            SleepSessionRecord.STAGE_TYPE_AWAKE -> "awake"
+                            SleepSessionRecord.STAGE_TYPE_SLEEPING -> "asleep"
+                            SleepSessionRecord.STAGE_TYPE_OUT_OF_BED -> "awake"
+                            SleepSessionRecord.STAGE_TYPE_AWAKE_IN_BED -> "inBed"
+                            else -> "asleep"
+                        })
+                        samples.put(st)
+                    }
                 }
+                Log.d(TAG, "readSleep: ${response.records.size} sessions, ${samples.length()} total samples")
                 val ret = JSObject()
                 ret.put("samples", samples)
                 call.resolve(ret)

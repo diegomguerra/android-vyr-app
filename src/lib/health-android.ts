@@ -82,7 +82,7 @@ export class AndroidHealthProvider implements IHealthProvider {
 
   async readRespiratoryRate(startDate: string, endDate: string): Promise<BridgeSample[]> {
     try {
-      const result = await HealthConnect.readRestingHeartRate({ startDate, endDate });
+      const result = await HealthConnect.readRespiratoryRate({ startDate, endDate });
       return result?.samples ?? [];
     } catch (e) {
       console.warn('[health-android] readRespiratoryRate error:', e);
@@ -93,10 +93,12 @@ export class AndroidHealthProvider implements IHealthProvider {
   async readSleep(startDate: string, endDate: string): Promise<SleepSample[]> {
     try {
       const result = await HealthConnect.readSleep({ startDate, endDate });
-      return (result?.samples ?? []).map((s: any) => ({
+      const samples = (result?.samples ?? []).map((s: any) => ({
         ...s,
-        sleepState: 'asleep',
+        sleepState: s.sleepState || 'asleep',
       }));
+      console.log('[health-android] readSleep:', samples.length, 'samples, states:', [...new Set(samples.map((s: any) => s.sleepState))]);
+      return samples;
     } catch (e) {
       console.warn('[health-android] readSleep error:', e);
       return [];

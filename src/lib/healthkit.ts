@@ -107,6 +107,16 @@ export function convertHRVtoScale(hrvMs: number): number {
   return Math.min(100, Math.round((Math.log(hrvMs) / Math.log(200)) * 100));
 }
 
+/** Derive resting heart rate from general HR samples by taking the lowest 20% average */
+function deriveRHR(hrSamples: { value: number }[]): number | undefined {
+  const vals = hrSamples.map(s => s.value).filter(v => !isNaN(v) && v > 30 && v < 220);
+  if (vals.length === 0) return undefined;
+  vals.sort((a, b) => a - b);
+  const count = Math.max(1, Math.floor(vals.length * 0.2));
+  const lowest = vals.slice(0, count);
+  return lowest.reduce((a, b) => a + b, 0) / lowest.length;
+}
+
 let observerListenerBound = false;
 
 export async function enableHealthKitBackgroundSync(): Promise<void> {
@@ -172,9 +182,10 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   const startDate = yesterday.toISOString();
   const endDate = now.toISOString();
 
-  const [sleepSamples, stepsSamples, rhrSamples, hrvSamples, spo2Samples, rrSamples] = await Promise.all([
+  const [sleepSamples, stepsSamples, hrSamples, rhrSamples, hrvSamples, spo2Samples, rrSamples] = await Promise.all([
     provider.readSleep(startDate, endDate).catch(() => [] as SleepSample[]),
     provider.readSteps(startDate, endDate).catch(() => []),
+    provider.readHeartRate(startDate, endDate).catch(() => []),
     provider.readRestingHeartRate(startDate, endDate).catch(() => []),
     provider.readHRV(startDate, endDate).catch(() => []),
     provider.readSpO2(startDate, endDate).catch(() => []),
@@ -183,7 +194,7 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
 
   console.info('[healthkit] sync samples count', {
     sleep: sleepSamples.length, steps: stepsSamples.length,
-    rhr: rhrSamples.length, hrv: hrvSamples.length,
+    hr: hrSamples.length, rhr: rhrSamples.length, hrv: hrvSamples.length,
     spo2: spo2Samples.length, rr: rrSamples.length,
     platform: getPlatform(), source: provider.getSourceProvider(),
   });
@@ -195,12 +206,16 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : undefined;
   };
 
-  const avgRhr = numAvg(rhrSamples);
+  // Use dedicated resting HR if available, otherwise derive from general HR samples
+  const avgRhr = numAvg(rhrSamples) ?? deriveRHR(hrSamples);
   const avgHrv = numAvg(hrvSamples);
   const avgSpo2 = numAvg(spo2Samples);
   const avgRR = numAvg(rrSamples);
 
+  const avgHr = numAvg(hrSamples);
+
   const metrics = {
+    hr_avg: avgHr ? Math.round(avgHr) : null,
     rhr: avgRhr ? Math.round(avgRhr) : null,
     hrv_sdnn: avgHrv ? Math.round(avgHrv * 10) / 10 : null,
     hrv_index: avgHrv ? convertHRVtoScale(avgHrv) : null,
