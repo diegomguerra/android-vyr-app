@@ -170,17 +170,29 @@
 }
 
 @keyframes breathe {
-  0%, 100% {
+  0% {
     opacity: 1;
-    filter: drop-shadow(0 0 10px var(--breathe-color));
+    filter: drop-shadow(0 0 8px var(--breathe-color)) drop-shadow(0 0 20px var(--breathe-color));
   }
-  50% {
-    opacity: 0.7;
-    filter: drop-shadow(0 0 22px var(--breathe-color));
+  30% {
+    opacity: 0.78;
+    filter: drop-shadow(0 0 18px var(--breathe-color)) drop-shadow(0 4px 30px var(--breathe-color));
+  }
+  55% {
+    opacity: 0.65;
+    filter: drop-shadow(0 0 28px var(--breathe-color)) drop-shadow(-3px 6px 40px var(--breathe-color)) drop-shadow(5px -2px 24px var(--breathe-color));
+  }
+  75% {
+    opacity: 0.82;
+    filter: drop-shadow(0 0 14px var(--breathe-color)) drop-shadow(3px -4px 34px var(--breathe-color));
+  }
+  100% {
+    opacity: 1;
+    filter: drop-shadow(0 0 8px var(--breathe-color)) drop-shadow(0 0 20px var(--breathe-color));
   }
 }
 
 .animate-breathe {
-  animation: breathe 4s ease-in-out infinite;
+  animation: breathe 5s ease-in-out infinite;
   will-change: opacity, filter;
 }
