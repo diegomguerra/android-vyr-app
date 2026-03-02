@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { getScoreColor } from '@/lib/vyr-score-color';
 
 interface StateRingProps {
   score: number;
@@ -56,11 +57,11 @@ const StateRing = ({ score, stateLabel, level }: StateRingProps) => {
           cy={size / 2}
           r={radius}
           fill="none"
-          stroke="hsl(var(--vyr-accent-action))"
+          stroke={getScoreColor(score)}
           strokeWidth={stroke}
           strokeDasharray={`${arcLength} ${circumference}`}
           strokeLinecap="round"
-          style={{ filter: 'drop-shadow(0 0 12px hsl(var(--vyr-accent-action) / 0.5))' }}
+          style={{ filter: `drop-shadow(0 0 12px ${getScoreColor(score)})` }}
         />
       </svg>
       {/* Center content */}

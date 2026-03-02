@@ -1,12 +1,8 @@
+import { getScoreColor } from '@/lib/vyr-score-color';
+
 interface MiniScoreRingProps {
   score: number;
   size?: number;
-}
-
-function getScoreColor(score: number): string {
-  if (score >= 70) return 'hsl(var(--vyr-accent-action))';
-  if (score >= 40) return 'hsl(var(--vyr-accent-transition))';
-  return '#EF4444';
 }
 
 const MiniScoreRing = ({ score, size = 36 }: MiniScoreRingProps) => {
