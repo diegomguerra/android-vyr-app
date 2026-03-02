@@ -62,7 +62,7 @@ const StateRing = ({ score, stateLabel, level }: StateRingProps) => {
           strokeDasharray={`${arcLength} ${circumference}`}
           strokeLinecap="round"
           className="animate-breathe"
-          style={{ filter: `drop-shadow(0 0 12px ${getScoreColor(score)})` }}
+          style={{ '--breathe-color': getScoreColor(score) } as React.CSSProperties}
         />
       </svg>
       {/* Center content */}
