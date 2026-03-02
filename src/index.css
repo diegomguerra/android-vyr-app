@@ -170,13 +170,13 @@
 }
 
 @keyframes breathe-opacity {
-  0%, 100% { opacity: 0.7; }
-  35% { opacity: 1; }
-  60% { opacity: 0.55; }
-  80% { opacity: 0.85; }
+  0%, 100% { opacity: 0.35; }
+  40% { opacity: 1; }
+  65% { opacity: 0.3; }
+  85% { opacity: 0.9; }
 }
 
 .animate-breathe-opacity {
-  animation: breathe-opacity 5s ease-in-out infinite;
+  animation: breathe-opacity 4s ease-in-out infinite;
   will-change: opacity;
 }
