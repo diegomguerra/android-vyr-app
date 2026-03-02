@@ -48,6 +48,11 @@ export async function recomputeStateWithPerceptions(subjective: SubjectiveInput)
       hrvIndex: rawInput.hrvIndex,
       hrvRawMs: rawInput.hrvRawMs,
       stressLevel: rawInput.stressLevel,
+    };
+
+    // Attach subjective scores as extra metadata (not part of BiometricData interface)
+    const enrichedData = {
+      ...biometricData,
       subjectiveEnergy: subjective.energy,
       subjectiveClarity: subjective.clarity,
       subjectiveFocus: subjective.focus,
@@ -67,7 +72,7 @@ export async function recomputeStateWithPerceptions(subjective: SubjectiveInput)
           level: vyrState.level,
           phase: vyrState.phase,
           pillars: vyrState.pillars as unknown as Json,
-          raw_input: biometricData as unknown as Json,
+          raw_input: enrichedData as unknown as Json,
         }],
         { onConflict: 'user_id,day' }
       ).select();
