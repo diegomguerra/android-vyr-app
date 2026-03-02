@@ -32,7 +32,7 @@ const ConnectionStatusPill = () => {
         .from('user_integrations')
         .select('provider, status, last_sync_at')
         .eq('user_id', session.user.id)
-        .eq('status', 'active')
+        .in('status', ['active', 'connected'])
         .limit(1)
         .maybeSingle() as any);
 
