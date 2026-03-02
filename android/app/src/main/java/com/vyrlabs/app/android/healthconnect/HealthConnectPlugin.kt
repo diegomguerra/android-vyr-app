@@ -49,11 +49,14 @@ class HealthConnectPlugin : Plugin() {
     @PluginMethod
     fun isAvailable(call: PluginCall) {
         try {
-            HealthConnectClient.getOrCreate(context)
+            val status = HealthConnectClient.getSdkStatus(context)
+            val available = status == HealthConnectClient.SDK_AVAILABLE
             val ret = JSObject()
-            ret.put("available", true)
+            ret.put("available", available)
+            ret.put("sdkStatus", status)
             call.resolve(ret)
         } catch (e: Exception) {
+            Log.e(TAG, "isAvailable error", e)
             val ret = JSObject()
             ret.put("available", false)
             call.resolve(ret)

@@ -1,5 +1,6 @@
 import { Lightbulb, Play } from 'lucide-react';
 import type { VYRState } from '@/lib/vyr-engine';
+import { getCurrentPhase } from '@/lib/vyr-engine';
 
 interface TransitionCardProps {
   state: VYRState;
@@ -53,7 +54,9 @@ function getSuggestedTransition(state: VYRState, actionsTaken: string[]): Transi
 const TransitionCard = ({ state, actionsTaken, onStartTransition }: TransitionCardProps) => {
   const suggestion = getSuggestedTransition(state, actionsTaken);
 
-  if (!suggestion.available) return null;
+  // Don't show if suggestion matches the current time-based phase (CTA already handles it)
+  const currentPhase = getCurrentPhase();
+  if (!suggestion.available || suggestion.targetPhase === currentPhase) return null;
 
   return (
     <div
