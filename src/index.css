@@ -36,9 +36,9 @@
 
     /* VYR Score Range Colors */
     --vyr-score-otimo: 108 57% 21%;
-    --vyr-score-bom: 108 49% 32%;
-    --vyr-score-moderado: 193 66% 35%;
-    --vyr-score-baixo: 0 0% 63%;
+    --vyr-score-bom: 193 66% 35%;
+    --vyr-score-moderado: 0 0% 63%;
+    --vyr-score-baixo: 37 100% 39%;
     --vyr-score-critico: 0 100% 40%;
 
     /* Shadcn mapping to VYR */
