@@ -34,6 +34,13 @@
     --vyr-caution: 42 32% 42%;
     --vyr-negative: 218 8% 47%;
 
+    /* VYR Score Range Colors */
+    --vyr-score-otimo: 108 57% 21%;
+    --vyr-score-bom: 108 49% 32%;
+    --vyr-score-moderado: 193 66% 35%;
+    --vyr-score-baixo: 0 0% 63%;
+    --vyr-score-critico: 0 100% 40%;
+
     /* Shadcn mapping to VYR */
     --background: 225 14% 6%;
     --foreground: 220 20% 94%;
