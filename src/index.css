@@ -172,14 +172,15 @@
 @keyframes breathe {
   0%, 100% {
     opacity: 1;
-    filter: drop-shadow(0 0 12px currentColor);
+    filter: drop-shadow(0 0 10px var(--breathe-color));
   }
   50% {
-    opacity: 0.72;
-    filter: drop-shadow(0 0 20px currentColor);
+    opacity: 0.7;
+    filter: drop-shadow(0 0 22px var(--breathe-color));
   }
 }
 
 .animate-breathe {
   animation: breathe 4s ease-in-out infinite;
+  will-change: opacity, filter;
 }
