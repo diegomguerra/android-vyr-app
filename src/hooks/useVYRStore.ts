@@ -5,6 +5,7 @@ import { requireValidUserId, retryOnAuthErrorLabeled } from '@/lib/auth-session'
 import { getCurrentPhase, computeScore, getLevel, getLimitingFactor } from '@/lib/vyr-engine';
 import type { VYRState, PillarScore } from '@/lib/vyr-engine';
 import { enableHealthKitBackgroundSync, isHealthKitAvailable, requestHealthKitPermissions, runIncrementalHealthSync } from '@/lib/healthkit';
+import { getLocalToday } from '@/lib/date-utils';
 
 export interface DayEntry {
   day: string;
@@ -68,7 +69,7 @@ export function useVYRStore() {
   const [sachetConfirmation, setSachetConfirmation] = useState<{ show: boolean; phase: string }>({ show: false, phase: 'BOOT' });
   const [userName, setUserName] = useState('');
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = getLocalToday();
 
   const loadData = useCallback(async () => {
     if (!userId) return;
@@ -84,7 +85,7 @@ export function useVYRStore() {
       supabase.from('daily_reviews').select('id, day, focus_score, clarity_score, energy_score, mood_score, notes')
         .eq('user_id', userId).order('day', { ascending: false }).limit(7),
       (supabase.from('user_integrations').select('provider, status, last_sync_at, scopes')
-        .eq('user_id', userId).eq('provider', 'apple_health').maybeSingle() as any),
+        .eq('user_id', userId).eq('provider', 'health_connect').maybeSingle() as any),
       (supabase.from('participantes').select('nome_publico')
         .eq('user_id', userId).maybeSingle() as any),
     ]);
@@ -203,7 +204,7 @@ export function useVYRStore() {
       await retryOnAuthErrorLabeled(async () => {
         const result = await (supabase.from('user_integrations') as any).upsert({
           user_id: uid,
-          provider: 'apple_health',
+          provider: 'health_connect',
           status: 'active',
           scopes: ['heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation', 'bodyTemperature', 'bloodPressureSystolic', 'bloodPressureDiastolic', 'vo2Max', 'activeEnergyBurned'],
         }, { onConflict: 'user_id,provider' }).select();
@@ -213,7 +214,7 @@ export function useVYRStore() {
       // Trigger first sync immediately after connecting
       const syncOk = await runIncrementalHealthSync('manual');
       setWearableConnection({
-        provider: 'apple_health',
+        provider: 'health_connect',
         status: 'active',
         lastSyncAt: syncOk ? new Date().toISOString() : null,
         scopes: ['heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation', 'bodyTemperature', 'bloodPressureSystolic', 'bloodPressureDiastolic', 'vo2Max', 'activeEnergyBurned'],
@@ -228,7 +229,7 @@ export function useVYRStore() {
       const result = await supabase.from('user_integrations')
         .update({ status: 'disconnected' })
         .eq('user_id', uid)
-        .eq('provider', 'apple_health')
+        .eq('provider', 'health_connect')
         .select();
       return result;
     }, { table: 'user_integrations', operation: 'update' });
@@ -245,6 +246,36 @@ export function useVYRStore() {
   }, [loadData]);
 
   const actionsTaken = actionLogs.map((a) => a.action_type);
+
+  // Phases with perception registered today
+  const perceptionsDone = actionLogs
+    .filter((a) => a.action_type.startsWith('perception_'))
+    .map((a) => a.action_type.replace('perception_', ''));
+
+  const getPhasePerceptionValues = useCallback((phase: string) => {
+    const log = actionLogs.find((a) => a.action_type === `perception_${phase}`);
+    return log?.payload?.values ?? null;
+  }, [actionLogs]);
+
+  // Log a perception for a phase (without dose)
+  const logPerception = useCallback(async (phase: string, values: { foco: number; clareza: number; energia: number; estabilidade: number }) => {
+    const uid = await requireValidUserId();
+    await retryOnAuthErrorLabeled(async () => {
+      const result = await supabase.from('action_logs').insert({
+        user_id: uid,
+        day: today,
+        action_type: `perception_${phase}`,
+        payload: { values, recorded_at: new Date().toISOString() },
+      }).select();
+      return result;
+    }, { table: 'action_logs', operation: 'insert' });
+    setActionLogs((prev) => [...prev, {
+      id: crypto.randomUUID(),
+      action_type: `perception_${phase}`,
+      payload: { values },
+      created_at: new Date().toISOString(),
+    }]);
+  }, [today]);
 
   return {
     state,
@@ -265,6 +296,9 @@ export function useVYRStore() {
     connectWearable,
     disconnectWearable,
     syncWearable,
+    perceptionsDone,
+    getPhasePerceptionValues,
+    logPerception,
     refresh: loadData,
   };
 }

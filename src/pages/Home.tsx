@@ -8,6 +8,7 @@ import InsightCard from '@/components/InsightCard';
 import CognitiveWindowCard from '@/components/CognitiveWindowCard';
 import TransitionCard from '@/components/TransitionCard';
 import SachetConfirmation from '@/components/SachetConfirmation';
+import PerceptionModal from '@/components/PerceptionModal';
 import CheckpointModal from '@/components/CheckpointModal';
 import NotificationBell from '@/components/NotificationBell';
 import ConnectionStatusPill from '@/components/ConnectionStatusPill';
@@ -15,6 +16,7 @@ import BottomNav from '@/components/BottomNav';
 import BrainLogo from '@/components/BrainLogo';
 import { interpret } from '@/lib/vyr-interpreter';
 import { useVYRStore } from '@/hooks/useVYRStore';
+import { getLocalToday } from '@/lib/date-utils';
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -32,8 +34,10 @@ const phaseConfig = {
 const Home = () => {
   const navigate = useNavigate();
   const store = useVYRStore();
-  const { state, hasData, userName, actionsTaken, sachetConfirmation } = store;
+  const { state, hasData, userName, actionsTaken, perceptionsDone, getPhasePerceptionValues, logPerception } = store;
   const [showCheckpoint, setShowCheckpoint] = useState(false);
+  const [perceptionModal, setPerceptionModal] = useState<{ show: boolean; phase: string }>({ show: false, phase: 'BOOT' });
+  const [sachetPhase, setSachetPhase] = useState<string | null>(null);
 
   const interpretation = useMemo(() => interpret(state), [state]);
   const phase = phaseConfig[state.phase];
@@ -41,20 +45,45 @@ const Home = () => {
   // Delta (today vs yesterday)
   const delta = useMemo(() => {
     if (store.historyByDay.length < 2) return 0;
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalToday();
     const todayEntry = store.historyByDay.find((h) => h.day === today);
     const yesterdayEntry = store.historyByDay.find((h) => h.day !== today);
     if (todayEntry && yesterdayEntry) return todayEntry.score - yesterdayEntry.score;
     return 0;
   }, [store.historyByDay]);
 
+  // Collect existing perception values for the day (to compute mean after 3rd phase)
+  const existingPhaseValues = useMemo(() => {
+    return perceptionsDone
+      .map((p) => {
+        const vals = getPhasePerceptionValues(p);
+        return vals ? { phase: p, values: vals } : null;
+      })
+      .filter((v): v is NonNullable<typeof v> => v !== null);
+  }, [perceptionsDone, getPhasePerceptionValues]);
+
   const handleConfirmSachet = useCallback(async () => {
     try {
       await store.logAction(state.phase);
+      // Dismiss the store's sachet confirmation, we'll use our own flow
+      store.dismissConfirmation();
+      // Open perception modal for this phase
+      setPerceptionModal({ show: true, phase: state.phase });
     } catch (err) {
       console.error('[home] Failed to log action:', err);
     }
   }, [state.phase, store]);
+
+  const handlePerceptionSave = useCallback(async (phase: string, values: { foco: number; clareza: number; energia: number; estabilidade: number }) => {
+    await logPerception(phase, values);
+  }, [logPerception]);
+
+  const handlePerceptionClose = useCallback(() => {
+    const closingPhase = perceptionModal.phase;
+    setPerceptionModal({ show: false, phase: '' });
+    // Show sachet confirmation after perception modal closes
+    setSachetPhase(closingPhase);
+  }, [perceptionModal.phase]);
 
   return (
     <div className="min-h-dvh bg-background pb-24 safe-area-top">
@@ -215,13 +244,23 @@ const Home = () => {
 
       <BottomNav />
 
-      {/* 11. SachetConfirmation */}
-      {sachetConfirmation.show && (
+      {/* Perception Modal — opens after dose registration */}
+      {perceptionModal.show && (
+        <PerceptionModal
+          phase={perceptionModal.phase}
+          onSave={handlePerceptionSave}
+          onClose={handlePerceptionClose}
+          existingPhaseValues={existingPhaseValues}
+        />
+      )}
+
+      {/* SachetConfirmation — shows after perception modal closes */}
+      {sachetPhase && (
         <SachetConfirmation
-          phase={sachetConfirmation.phase}
-          onDismiss={store.dismissConfirmation}
+          phase={sachetPhase}
+          onDismiss={() => setSachetPhase(null)}
           onAddObservation={() => {
-            store.dismissConfirmation();
+            setSachetPhase(null);
             setShowCheckpoint(true);
           }}
         />
