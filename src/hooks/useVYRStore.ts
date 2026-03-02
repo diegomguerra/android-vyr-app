@@ -127,8 +127,20 @@ export function useVYRStore() {
     // Reviews
     if (reviewsRes.data) setDailyReviews(reviewsRes.data);
 
-    // Wearable
-    if (integrationRes.data) {
+    // Wearable — check if reconnect is needed (after version change)
+    const needsReconnect = localStorage.getItem('vyr_needs_reconnect') === 'true';
+    if (needsReconnect) {
+      localStorage.removeItem('vyr_needs_reconnect');
+      setWearableConnection(null);
+      // Mark as disconnected in DB so next login also shows the banner
+      if (integrationRes.data && userId) {
+        supabase.from('user_integrations')
+          .update({ status: 'disconnected' })
+          .eq('user_id', userId)
+          .eq('provider', 'health_connect')
+          .then(() => console.info('[store] integration reset after version change'));
+      }
+    } else if (integrationRes.data) {
       setWearableConnection({
         provider: integrationRes.data.provider,
         status: integrationRes.data.status,

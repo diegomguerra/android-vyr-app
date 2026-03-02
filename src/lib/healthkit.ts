@@ -212,8 +212,13 @@ function setLastSyncTimestamp(type: string, iso: string): void {
 async function _syncHealthKitDataInternal(): Promise<boolean> {
   const available = await isHealthKitAvailable();
   if (!available) return false;
-  const userId = await requireValidUserId();
+
+  // Always ensure permissions before reading data
   const provider = await getProvider();
+  const permissionsOk = await provider.requestPermissions();
+  console.info('[healthkit] permissions check before sync:', permissionsOk);
+
+  const userId = await requireValidUserId();
 
   // Use local date for the day key and local midnight for the start window
   const today = getLocalToday();
@@ -234,6 +239,14 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   ]);
 
   console.info('[healthkit] sync window:', { startDate, endDate, today });
+
+  // If ALL reads returned empty, permissions likely failed — don't overwrite existing data
+  const totalSamples = sleepSamples.length + stepsSamples.length + hrSamples.length +
+    rhrSamples.length + hrvSamples.length + spo2Samples.length + rrSamples.length;
+  if (totalSamples === 0) {
+    console.warn('[healthkit] sync aborted: no data from any source (permissions may be missing)');
+    return false;
+  }
   console.info('[healthkit] sync samples count', {
     sleep: sleepSamples.length, steps: stepsSamples.length,
     hr: hrSamples.length, rhr: rhrSamples.length, hrv: hrvSamples.length,

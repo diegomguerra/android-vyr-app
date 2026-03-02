@@ -20,12 +20,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     // Force re-login when APK version changes
-    const APP_VERSION = '1.1.0';
+    const APP_VERSION = '1.2.0';
     const STORED_VERSION_KEY = 'vyr_app_version';
     const storedVersion = localStorage.getItem(STORED_VERSION_KEY);
     if (storedVersion && storedVersion !== APP_VERSION) {
       console.info('[auth] App version changed, clearing session');
       localStorage.clear();
+      localStorage.setItem('vyr_needs_reconnect', 'true');
       supabase.auth.signOut();
     }
     localStorage.setItem(STORED_VERSION_KEY, APP_VERSION);
