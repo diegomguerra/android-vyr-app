@@ -86,19 +86,37 @@ export async function writeBloodPressure(systolic: number, diastolic: number, st
 }
 
 export function calculateSleepQuality(samples: SleepSample[]): { durationHours: number; quality: number } {
-  const validSamples = samples.filter((s) => s.sleepState && s.sleepState !== 'awake' && s.sleepState !== 'inBed');
-  if (validSamples.length === 0) return { durationHours: 0, quality: 0 };
-  let totalMs = 0, deepMs = 0, remMs = 0;
-  for (const s of validSamples) {
+  // Session-level samples ("asleep") give total duration
+  const sessions = samples.filter((s) => s.sleepState === 'asleep');
+  // Stage-level samples give quality breakdown (deep/rem/light)
+  const stages = samples.filter((s) => s.sleepState && s.sleepState !== 'asleep' && s.sleepState !== 'awake' && s.sleepState !== 'inBed');
+
+  // Duration from sessions only (avoids double-counting with stages)
+  let totalMs = 0;
+  for (const s of sessions) {
     const ms = new Date(s.endDate).getTime() - new Date(s.startDate).getTime();
-    totalMs += ms;
+    if (ms > 0) totalMs += ms;
+  }
+  if (totalMs === 0) return { durationHours: 0, quality: 0 };
+
+  // Quality from stage breakdown if available
+  let deepMs = 0, remMs = 0;
+  for (const s of stages) {
+    const ms = new Date(s.endDate).getTime() - new Date(s.startDate).getTime();
     if (s.sleepState === 'deep') deepMs += ms;
     if (s.sleepState === 'rem') remMs += ms;
   }
-  if (totalMs === 0) return { durationHours: 0, quality: 0 };
+
+  // If no stage data, estimate 50% quality based on duration alone
+  const quality = stages.length > 0
+    ? Math.min(100, Math.round(((deepMs / totalMs) + (remMs / totalMs) * 2.5) * 100))
+    : Math.min(100, Math.round((totalMs / (8 * 3600000)) * 50));
+
+  console.log('[healthkit] sleep calc:', { sessions: sessions.length, stages: stages.length, totalMs, deepMs, remMs, quality });
+
   return {
     durationHours: totalMs / (1000 * 60 * 60),
-    quality: Math.min(100, Math.round(((deepMs / totalMs) + (remMs / totalMs) * 2.5) * 100)),
+    quality,
   };
 }
 
@@ -115,6 +133,21 @@ function deriveRHR(hrSamples: { value: number }[]): number | undefined {
   const count = Math.max(1, Math.floor(vals.length * 0.2));
   const lowest = vals.slice(0, count);
   return lowest.reduce((a, b) => a + b, 0) / lowest.length;
+}
+
+/** Derive pseudo-RMSSD HRV from consecutive HR samples (approximation) */
+function derivePseudoHRV(hrSamples: { value: number }[]): number | undefined {
+  const vals = hrSamples.map(s => s.value).filter(v => !isNaN(v) && v > 30 && v < 220);
+  if (vals.length < 3) return undefined;
+  // Convert BPM to RR intervals (ms), compute successive differences
+  const rrIntervals = vals.map(bpm => 60000 / bpm);
+  let sumSqDiff = 0;
+  for (let i = 1; i < rrIntervals.length; i++) {
+    const diff = rrIntervals[i] - rrIntervals[i - 1];
+    sumSqDiff += diff * diff;
+  }
+  const rmssd = Math.sqrt(sumSqDiff / (rrIntervals.length - 1));
+  return rmssd > 0 ? Math.round(rmssd * 10) / 10 : undefined;
 }
 
 let observerListenerBound = false;
@@ -206,19 +239,24 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : undefined;
   };
 
-  // Use dedicated resting HR if available, otherwise derive from general HR samples
+  // Use dedicated metrics if available, otherwise derive from general HR samples
+  const avgHr = numAvg(hrSamples);
   const avgRhr = numAvg(rhrSamples) ?? deriveRHR(hrSamples);
-  const avgHrv = numAvg(hrvSamples);
+  const avgHrv = numAvg(hrvSamples) ?? derivePseudoHRV(hrSamples);
   const avgSpo2 = numAvg(spo2Samples);
   const avgRR = numAvg(rrSamples);
 
-  const avgHr = numAvg(hrSamples);
+  // Derive stress level from HRV (lower HRV = higher stress, scale 0-100)
+  const stressLevel = avgHrv != null ? Math.max(0, Math.min(100, Math.round(100 - convertHRVtoScale(avgHrv)))) : null;
+
+  console.info('[healthkit] derived metrics:', { avgHr, avgRhr, avgHrv, stressLevel, avgSpo2, avgRR, durationHours, sleepQuality });
 
   const metrics = {
     hr_avg: avgHr ? Math.round(avgHr) : null,
     rhr: avgRhr ? Math.round(avgRhr) : null,
     hrv_sdnn: avgHrv ? Math.round(avgHrv * 10) / 10 : null,
     hrv_index: avgHrv ? convertHRVtoScale(avgHrv) : null,
+    stress_level: stressLevel,
     sleep_duration_hours: Math.round(durationHours * 10) / 10,
     sleep_quality: sleepQuality,
     steps: totalSteps,

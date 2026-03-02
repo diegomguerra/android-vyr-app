@@ -69,12 +69,20 @@ class HealthConnectPlugin : Plugin() {
             try {
                 val client = getClient()
                 val granted = client.permissionController.getGrantedPermissions()
+                Log.d(TAG, "Current permissions: ${granted.size}/${PERMISSIONS.size}")
+
                 if (granted.containsAll(PERMISSIONS)) {
+                    // All permissions already granted — resolve immediately
+                    Log.d(TAG, "All permissions already granted")
                     val ret = JSObject()
                     ret.put("granted", true)
+                    ret.put("alreadyGranted", true)
                     call.resolve(ret)
                     return@launch
                 }
+
+                // Request missing permissions
+                Log.d(TAG, "Requesting missing permissions")
                 pendingPermissionCall = call
                 val launcher = com.vyrlabs.app.android.MainActivity.permissionLauncher
                 activity.runOnUiThread {

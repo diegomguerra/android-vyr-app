@@ -1,6 +1,6 @@
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { TrendingUp, TrendingDown, Minus, ChevronRight, Play, Activity, Check } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus, ChevronRight, Play, Activity, Check, Heart, RefreshCw } from 'lucide-react';
 import StateRing from '@/components/StateRing';
 import PillarRing from '@/components/PillarRing';
 import ContextCard from '@/components/ContextCard';
@@ -35,10 +35,27 @@ const phaseConfig: Record<string, { label: string; colorVar: string; color: stri
 const Home = () => {
   const navigate = useNavigate();
   const store = useVYRStore();
-  const { state, hasData, userName, actionsTaken, perceptionsDone, getPhasePerceptionValues, logPerception } = store;
+  const { state, hasData, userName, actionsTaken, perceptionsDone, getPhasePerceptionValues, logPerception, wearableConnection, connectWearable, syncWearable } = store;
   const [showCheckpoint, setShowCheckpoint] = useState(false);
   const [perceptionModal, setPerceptionModal] = useState<{ show: boolean; phase: string }>({ show: false, phase: 'BOOT' });
   const [sachetPhase, setSachetPhase] = useState<string | null>(null);
+  const [connectingHC, setConnectingHC] = useState(false);
+  const [syncingHC, setSyncingHC] = useState(false);
+
+  const isHCConnected = wearableConnection?.status === 'active' || wearableConnection?.status === 'connected';
+
+  // Auto-sync Health Connect on Home mount if connected
+  useEffect(() => {
+    if (!isHCConnected) return;
+    let cancelled = false;
+    const autoSync = async () => {
+      setSyncingHC(true);
+      await syncWearable();
+      if (!cancelled) setSyncingHC(false);
+    };
+    autoSync();
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const interpretation = useMemo(() => interpret(state), [state]);
   const phase = phaseConfig[state.phase];
@@ -102,6 +119,40 @@ const Home = () => {
           <NotificationBell />
         </div>
       </header>
+
+      {/* Health Connect Banner */}
+      {!isHCConnected && (
+        <div className="mx-5 mb-2 rounded-2xl p-4" style={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center flex-shrink-0">
+              <Heart size={20} className="text-white" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-sm font-semibold text-foreground">Health Connect</h3>
+              <p className="text-xs text-muted-foreground">Conecte para sincronizar dados do wearable.</p>
+            </div>
+          </div>
+          <button
+            onClick={async () => {
+              setConnectingHC(true);
+              await connectWearable();
+              setConnectingHC(false);
+            }}
+            disabled={connectingHC}
+            className="w-full mt-3 rounded-xl bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-medium py-2.5 text-sm transition-all active:scale-[0.98] disabled:opacity-50"
+          >
+            {connectingHC ? 'Conectando...' : 'Conectar e Sincronizar'}
+          </button>
+        </div>
+      )}
+
+      {/* Syncing indicator */}
+      {isHCConnected && syncingHC && (
+        <div className="mx-5 mb-2 flex items-center justify-center gap-2 py-2 rounded-xl" style={{ background: 'hsl(var(--card))' }}>
+          <RefreshCw size={14} className="animate-spin text-muted-foreground" />
+          <span className="text-xs text-muted-foreground">Sincronizando Health Connect...</span>
+        </div>
+      )}
 
       {/* 2. StateRing */}
       <div className="flex flex-col items-center pt-2" style={{ animation: 'fade-in 150ms ease-out' }}>

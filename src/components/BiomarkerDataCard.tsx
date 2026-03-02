@@ -5,7 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { getLocalToday } from '@/lib/date-utils';
 
 interface Metrics {
-  hr: number | null;
+  hr_avg: number | null;
   rhr: number | null;
   hrv_sdnn: number | null;
   sleep_duration_hours: number | null;
@@ -56,7 +56,7 @@ const BiomarkerDataCard = ({ refreshKey }: BiomarkerDataCardProps) => {
   }
 
   const items = [
-    { icon: Heart, label: 'FC', value: metrics.hr, unit: 'bpm', color: 'text-red-400' },
+    { icon: Heart, label: 'FC', value: metrics.hr_avg, unit: 'bpm', color: 'text-red-400' },
     { icon: Heart, label: 'FC Repouso', value: metrics.rhr, unit: 'bpm', color: 'text-rose-400' },
     { icon: Activity, label: 'HRV', value: metrics.hrv_sdnn, unit: 'ms', color: 'text-emerald-400' },
     { icon: Moon, label: 'Sono', value: metrics.sleep_duration_hours, unit: 'h', color: 'text-indigo-400' },

@@ -19,6 +19,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Force re-login when APK version changes
+    const APP_VERSION = '1.1.0';
+    const STORED_VERSION_KEY = 'vyr_app_version';
+    const storedVersion = localStorage.getItem(STORED_VERSION_KEY);
+    if (storedVersion && storedVersion !== APP_VERSION) {
+      console.info('[auth] App version changed, clearing session');
+      localStorage.clear();
+      supabase.auth.signOut();
+    }
+    localStorage.setItem(STORED_VERSION_KEY, APP_VERSION);
+
     // Set up listener BEFORE getSession (per Supabase best practice)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {

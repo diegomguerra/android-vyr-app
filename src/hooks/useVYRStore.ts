@@ -206,7 +206,7 @@ export function useVYRStore() {
           user_id: uid,
           provider: 'health_connect',
           status: 'active',
-          scopes: ['heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation', 'bodyTemperature', 'bloodPressureSystolic', 'bloodPressureDiastolic', 'vo2Max', 'activeEnergyBurned'],
+          scopes: ['heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation', 'respiratoryRate', 'bodyTemperature', 'bloodPressureSystolic', 'bloodPressureDiastolic', 'vo2Max', 'activeEnergyBurned'],
         }, { onConflict: 'user_id,provider' }).select();
         return result;
       }, { table: 'user_integrations', operation: 'upsert' });
@@ -217,7 +217,7 @@ export function useVYRStore() {
         provider: 'health_connect',
         status: 'active',
         lastSyncAt: syncOk ? new Date().toISOString() : null,
-        scopes: ['heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation', 'bodyTemperature', 'bloodPressureSystolic', 'bloodPressureDiastolic', 'vo2Max', 'activeEnergyBurned'],
+        scopes: ['heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation', 'respiratoryRate', 'bodyTemperature', 'bloodPressureSystolic', 'bloodPressureDiastolic', 'vo2Max', 'activeEnergyBurned'],
       });
     }
     return ok;
