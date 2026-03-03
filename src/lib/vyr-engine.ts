@@ -9,7 +9,7 @@ export interface BiometricData {
   sleepRegularity?: number; // deviation in minutes
   awakenings?: number;    // count
   hrvIndex?: number;      // 0-100 (already normalized)
-  hrvRawMs?: number;      // ms (SDNN) — raw, will be normalized
+  hrvRawMs?: number;      // ms (RMSSD ou SDNN conforme plataforma) — raw, will be normalized
   stressLevel?: number;   // 0-100
   tempDeviation?: number; // °C deviation from baseline
   activityLevel?: 'high' | 'moderate' | 'low' | null;
@@ -57,8 +57,13 @@ const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(mi
  * Normalize raw HRV ms to 0-100 index (logarithmic)
  */
 export function normalizeHRV(ms: number): number {
+  if (ms < 1) return 0;
   const clamped = clamp(ms, 5, 200);
-  return (Math.log(clamped) - Math.log(5)) / (Math.log(200) - Math.log(5)) * 100;
+  // ln(RMSSD) normalizado: ln(5)≈1.61 → 0, ln(200)≈5.30 → 100
+  const lnVal = Math.log(clamped);
+  const lnMin = Math.log(5);
+  const lnMax = Math.log(200);
+  return Math.round(((lnVal - lnMin) / (lnMax - lnMin)) * 100);
 }
 
 /**

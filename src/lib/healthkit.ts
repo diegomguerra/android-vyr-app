@@ -126,8 +126,12 @@ export function calculateSleepQuality(samples: SleepSample[]): { durationHours: 
 
 export function convertHRVtoScale(hrvMs: number): number {
   if (hrvMs < 1) return 0;
-  const clamped = Math.min(hrvMs, 200);
-  return Math.max(0, Math.min(100, Math.round((Math.log(clamped) / Math.log(200)) * 100)));
+  const clamped = Math.max(5, Math.min(200, hrvMs));
+  // ln(RMSSD) normalizado: ln(5)≈1.61 → 0, ln(200)≈5.30 → 100
+  const lnVal = Math.log(clamped);
+  const lnMin = Math.log(5);
+  const lnMax = Math.log(200);
+  return Math.round(((lnVal - lnMin) / (lnMax - lnMin)) * 100);
 }
 
 /** Derive resting heart rate from general HR samples by taking the lowest 20% average */
@@ -140,12 +144,32 @@ function deriveRHR(hrSamples: { value: number }[]): number | undefined {
   return lowest.reduce((a, b) => a + b, 0) / lowest.length;
 }
 
-/** Derive pseudo-RMSSD HRV from consecutive HR samples (approximation) */
-function derivePseudoHRV(hrSamples: { value: number }[]): number | undefined {
-  const vals = hrSamples.map(s => s.value).filter(v => !isNaN(v) && v > 30 && v < 220);
-  if (vals.length < 3) return undefined;
+/**
+ * Derive pseudo-RMSSD HRV from consecutive HR samples (approximation).
+ * WARNING: This is a rough estimate from aggregated BPM, not beat-to-beat intervals.
+ * Requires >= 10 samples for minimal statistical significance.
+ * Returns undefined if samples are too sparse (> 5 min avg spacing).
+ */
+function derivePseudoHRV(hrSamples: { value: number; startDate?: string }[]): number | undefined {
+  const valid = hrSamples.filter(s => !isNaN(s.value) && s.value > 30 && s.value < 220);
+  if (valid.length < 10) return undefined;
+
+  // Check temporal spacing — if samples are > 5 min apart on average, resolution is too low
+  if (valid[0]?.startDate && valid[valid.length - 1]?.startDate) {
+    const firstTs = new Date(valid[0].startDate).getTime();
+    const lastTs = new Date(valid[valid.length - 1].startDate).getTime();
+    const spanMs = Math.abs(lastTs - firstTs);
+    if (spanMs > 0) {
+      const avgSpacingMin = (spanMs / (valid.length - 1)) / 60000;
+      if (avgSpacingMin > 5) {
+        console.warn('[healthkit] derivePseudoHRV: samples too sparse (avg spacing %.1f min), skipping', avgSpacingMin);
+        return undefined;
+      }
+    }
+  }
+
   // Convert BPM to RR intervals (ms), compute successive differences
-  const rrIntervals = vals.map(bpm => 60000 / bpm);
+  const rrIntervals = valid.map(s => 60000 / s.value);
   let sumSqDiff = 0;
   for (let i = 1; i < rrIntervals.length; i++) {
     const diff = rrIntervals[i] - rrIntervals[i - 1];
@@ -279,6 +303,8 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     hr_avg: avgHr ? Math.round(avgHr) : null,
     rhr: avgRhr ? Math.round(avgRhr) : null,
     hrv_sdnn: avgHrv ? Math.round(avgHrv * 10) / 10 : null,
+    hrv_rmssd: getPlatform() === 'android' && avgHrv ? Math.round(avgHrv * 10) / 10 : null,
+    hrv_type: getPlatform() === 'android' ? 'rmssd' as const : 'sdnn' as const,
     hrv_index: avgHrv ? convertHRVtoScale(avgHrv) : null,
     stress_level: stressLevel,
     sleep_duration_hours: Math.round(durationHours * 10) / 10,

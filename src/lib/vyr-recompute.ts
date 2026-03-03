@@ -46,7 +46,7 @@ export async function recomputeStateWithPerceptions(subjective: SubjectiveInput)
       sleepQuality: rawInput.sleepQuality ?? rawInput.sleep_quality,
       spo2: rawInput.spo2,
       hrvIndex: rawInput.hrvIndex ?? rawInput.hrv_index,
-      hrvRawMs: rawInput.hrvRawMs ?? rawInput.hrv_sdnn,
+      hrvRawMs: rawInput.hrvRawMs ?? rawInput.hrv_rmssd ?? rawInput.hrv_sdnn,
       stressLevel: rawInput.stressLevel ?? rawInput.stress_level,
     };
 
