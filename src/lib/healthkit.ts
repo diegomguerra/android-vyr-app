@@ -162,6 +162,41 @@ function deriveRHR(hrSamples: { value: number }[]): number | undefined {
 }
 
 /**
+ * Derive pseudo-RMSSD HRV from consecutive HR samples.
+ * Used as fallback when the wearable doesn't write HRV to Health Connect.
+ * Converts BPM to RR intervals and computes successive differences.
+ * Requires >= 10 samples with avg spacing <= 5 min.
+ */
+function derivePseudoHRV(hrSamples: { value: number; startDate?: string }[]): number | undefined {
+  const valid = hrSamples.filter(s => !isNaN(s.value) && s.value > 30 && s.value < 220);
+  if (valid.length < 10) return undefined;
+
+  // Check temporal spacing — if samples are > 5 min apart on average, resolution is too low
+  if (valid[0]?.startDate && valid[valid.length - 1]?.startDate) {
+    const firstTs = new Date(valid[0].startDate).getTime();
+    const lastTs = new Date(valid[valid.length - 1].startDate).getTime();
+    const spanMs = Math.abs(lastTs - firstTs);
+    if (spanMs > 0) {
+      const avgSpacingMin = (spanMs / (valid.length - 1)) / 60000;
+      if (avgSpacingMin > 5) {
+        console.warn('[healthkit] derivePseudoHRV: samples too sparse (avg spacing', avgSpacingMin.toFixed(1), 'min), skipping');
+        return undefined;
+      }
+    }
+  }
+
+  // Convert BPM to RR intervals (ms), compute successive differences
+  const rrIntervals = valid.map(s => 60000 / s.value);
+  let sumSqDiff = 0;
+  for (let i = 1; i < rrIntervals.length; i++) {
+    const diff = rrIntervals[i] - rrIntervals[i - 1];
+    sumSqDiff += diff * diff;
+  }
+  const rmssd = Math.sqrt(sumSqDiff / (rrIntervals.length - 1));
+  return rmssd > 0 ? Math.round(rmssd * 10) / 10 : undefined;
+}
+
+/**
  * Compute stress level using z-score on ln(RMSSD) with contextual modifiers.
  * Follows spec Part 4: z-score clamped to [-3,+3], mapped linearly.
  * Rule 3: returns null during calibration.
@@ -302,9 +337,9 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     provider.readSleep(overnightStart, endDate).catch(() => [] as SleepSample[]),
     // Steps: today only (avoid double-counting yesterday's steps)
     provider.readSteps(todayStart, endDate).catch(() => []),
-    // HR/vitals: today only
-    provider.readHeartRate(todayStart, endDate).catch(() => []),
-    provider.readRestingHeartRate(todayStart, endDate).catch(() => []),
+    // HR: from yesterday midnight (needed for derivePseudoHRV fallback + overnight data)
+    provider.readHeartRate(overnightStart, endDate).catch(() => []),
+    provider.readRestingHeartRate(overnightStart, endDate).catch(() => []),
     // HRV: from yesterday midnight (captures overnight readings)
     provider.readHRV(overnightStart, endDate).catch(() => []),
     provider.readSpO2(todayStart, endDate).catch(() => []),
@@ -368,11 +403,13 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   // Use dedicated metrics if available, otherwise derive from general HR samples
   const avgHr = bioAvg(fHr, 30);   // HR must be >= 30 bpm
   const avgRhr = bioAvg(fRhr, 30) ?? deriveRHR(fHr);
-  // Filter HRV artifacts: only accept physiological range 5-250ms
+  // HRV: use real HC data if available, otherwise derive from HR samples
   const hrvFiltered = fHrv.filter(s => s.value >= 5 && s.value <= 250);
-  const avgHrv = hrvFiltered.length > 0
+  const realHrv = hrvFiltered.length > 0
     ? hrvFiltered.map(s => s.value).reduce((a, b) => a + b, 0) / hrvFiltered.length
     : undefined;
+  const avgHrv = realHrv ?? derivePseudoHRV(fHr);
+  console.info('[healthkit] HRV source:', realHrv != null ? 'Health Connect' : (avgHrv != null ? 'derived from HR' : 'unavailable'), '| value:', avgHrv);
   const avgSpo2 = bioAvg(fSpo2, 50); // SpO2 must be >= 50%
   const avgRR = bioAvg(fRr, 5);      // RR must be >= 5 breaths/min
 
