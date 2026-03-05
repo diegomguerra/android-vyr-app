@@ -287,25 +287,31 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
 
   const userId = await requireValidUserId();
 
-  // Use local date for the day key and local midnight for the start window
+  // Use local date for the day key
   const today = getLocalToday();
   const now = new Date();
-  // Start from local midnight yesterday (covers overnight sleep)
+  // Two windows: today-only for steps/HR/vitals, overnight for sleep/HRV
+  const localMidnightToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
   const localMidnightYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0);
-  const startDate = localMidnightYesterday.toISOString();
+  const todayStart = localMidnightToday.toISOString();
+  const overnightStart = localMidnightYesterday.toISOString();
   const endDate = now.toISOString();
 
   const [sleepSamples, stepsSamples, hrSamples, rhrSamples, hrvSamples, spo2Samples, rrSamples] = await Promise.all([
-    provider.readSleep(startDate, endDate).catch(() => [] as SleepSample[]),
-    provider.readSteps(startDate, endDate).catch(() => []),
-    provider.readHeartRate(startDate, endDate).catch(() => []),
-    provider.readRestingHeartRate(startDate, endDate).catch(() => []),
-    provider.readHRV(startDate, endDate).catch(() => []),
-    provider.readSpO2(startDate, endDate).catch(() => []),
-    provider.readRespiratoryRate(startDate, endDate).catch(() => []),
+    // Sleep + HRV: from yesterday midnight (captures overnight sleep)
+    provider.readSleep(overnightStart, endDate).catch(() => [] as SleepSample[]),
+    // Steps: today only (avoid double-counting yesterday's steps)
+    provider.readSteps(todayStart, endDate).catch(() => []),
+    // HR/vitals: today only
+    provider.readHeartRate(todayStart, endDate).catch(() => []),
+    provider.readRestingHeartRate(todayStart, endDate).catch(() => []),
+    // HRV: from yesterday midnight (captures overnight readings)
+    provider.readHRV(overnightStart, endDate).catch(() => []),
+    provider.readSpO2(todayStart, endDate).catch(() => []),
+    provider.readRespiratoryRate(todayStart, endDate).catch(() => []),
   ]);
 
-  console.info('[healthkit] sync window:', { startDate, endDate, today });
+  console.info('[healthkit] sync windows:', { todayStart, overnightStart, endDate, today });
 
   // If ALL reads returned empty, permissions likely failed — don't overwrite existing data
   const totalSamples = sleepSamples.length + stepsSamples.length + hrSamples.length +
@@ -339,7 +345,19 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   });
 
   const { durationHours, quality: sleepQuality } = calculateSleepQuality(fSleep);
-  const totalSteps = fSteps.map(s => s.value).reduce((a, b) => a + b, 0);
+
+  // Deduplicate steps: multiple sources may count the same steps.
+  // Group by source, sum each source's records, then take the MAX source total.
+  // This matches how Health Connect's UI deduplicates.
+  const stepsBySource = new Map<string, number>();
+  for (const s of fSteps) {
+    const src = (s as any).source || 'unknown';
+    stepsBySource.set(src, (stepsBySource.get(src) || 0) + s.value);
+  }
+  const totalSteps = stepsBySource.size > 0
+    ? Math.max(...stepsBySource.values())
+    : 0;
+  console.info('[healthkit] steps by source:', Object.fromEntries(stepsBySource), '→ deduped:', totalSteps);
 
   // Average for biometric values (filter NaN only, allow zeros for steps)
   const bioAvg = (samples: { value: number }[], minVal = 0) => {
