@@ -91,52 +91,81 @@ export async function writeBloodPressure(systolic: number, diastolic: number, st
 }
 
 export function calculateSleepQuality(samples: SleepSample[]): { durationHours: number; quality: number } {
-  // Session-level samples ("asleep") give total duration
-  const sessions = samples.filter((s) => s.sleepState === 'asleep');
-  // Stage-level samples give quality breakdown (deep/rem/light)
-  const stages = samples.filter((s) => s.sleepState && s.sleepState !== 'asleep' && s.sleepState !== 'awake' && s.sleepState !== 'inBed');
+  if (samples.length === 0) return { durationHours: 0, quality: 0 };
 
-  // Duration from sessions
-  let sessionMs = 0;
-  for (const s of sessions) {
-    const ms = new Date(s.endDate).getTime() - new Date(s.startDate).getTime();
-    if (ms > 0) sessionMs += ms;
-    console.log('[healthkit] sleep session:', s.startDate, '→', s.endDate, '=', Math.round(ms / 60000), 'min');
-  }
+  // Separate sleep vs awake samples
+  const awakeSamples = samples.filter((s) => s.sleepState === 'awake' || s.sleepState === 'inBed');
+  const sleepSamples2 = samples.filter((s) => s.sleepState && s.sleepState !== 'awake' && s.sleepState !== 'inBed');
 
-  // Duration from stages (deep + rem + light = actual sleep time)
-  let stageMs = 0, deepMs = 0, remMs = 0, lightMs = 0;
+  // Stage breakdown for quality (deep/rem/light only)
+  const stages = samples.filter((s) => s.sleepState === 'deep' || s.sleepState === 'rem' || s.sleepState === 'light');
+  let deepMs = 0, remMs = 0, lightMs = 0;
   for (const s of stages) {
     const ms = new Date(s.endDate).getTime() - new Date(s.startDate).getTime();
-    if (ms > 0) stageMs += ms;
     if (s.sleepState === 'deep') deepMs += ms;
     if (s.sleepState === 'rem') remMs += ms;
     if (s.sleepState === 'light') lightMs += ms;
   }
 
-  // Use the larger of session vs stage duration — handles fragmented sessions
-  // and apps that write stages covering more time than the session wrapper
-  const totalMs = Math.max(sessionMs, stageMs);
+  // Merge overlapping/adjacent intervals to get true sleep duration.
+  // Many wearables (e.g. JCVital) write each sleep stage as a separate
+  // overlapping SleepSessionRecord. Summing durations double-counts.
+  const intervals = sleepSamples2
+    .map(s => ({ start: new Date(s.startDate).getTime(), end: new Date(s.endDate).getTime() }))
+    .filter(i => i.end > i.start)
+    .sort((a, b) => a.start - b.start);
+
+  const merged: { start: number; end: number }[] = [];
+  for (const iv of intervals) {
+    const last = merged[merged.length - 1];
+    if (last && iv.start <= last.end) {
+      // Overlapping or adjacent — extend
+      last.end = Math.max(last.end, iv.end);
+    } else {
+      merged.push({ ...iv });
+    }
+  }
+
+  const totalSleepMs = merged.reduce((sum, iv) => sum + (iv.end - iv.start), 0);
+
+  // Subtract awake periods that fall within merged sleep blocks
+  let awakeMs = 0;
+  for (const a of awakeSamples) {
+    const aStart = new Date(a.startDate).getTime();
+    const aEnd = new Date(a.endDate).getTime();
+    for (const block of merged) {
+      const overlapStart = Math.max(aStart, block.start);
+      const overlapEnd = Math.min(aEnd, block.end);
+      if (overlapEnd > overlapStart) awakeMs += (overlapEnd - overlapStart);
+    }
+  }
+
+  const netSleepMs = Math.max(0, totalSleepMs - awakeMs);
 
   console.log('[healthkit] sleep calc:', {
-    sessions: sessions.length, stages: stages.length,
-    sessionMin: Math.round(sessionMs / 60000),
-    stageMin: Math.round(stageMs / 60000),
-    totalMin: Math.round(totalMs / 60000),
+    totalSamples: samples.length,
+    sleepSamples: sleepSamples2.length,
+    awakeSamples: awakeSamples.length,
+    stages: stages.length,
+    mergedBlocks: merged.length,
+    totalSleepMin: Math.round(totalSleepMs / 60000),
+    awakeMin: Math.round(awakeMs / 60000),
+    netSleepMin: Math.round(netSleepMs / 60000),
     deepMin: Math.round(deepMs / 60000),
     remMin: Math.round(remMs / 60000),
     lightMin: Math.round(lightMs / 60000),
   });
 
-  if (totalMs === 0) return { durationHours: 0, quality: 0 };
+  if (netSleepMs === 0) return { durationHours: 0, quality: 0 };
 
   // Quality from stage breakdown if available
-  const quality = stages.length > 0
-    ? Math.min(100, Math.round(((deepMs / totalMs) + (remMs / totalMs) * 2.5) * 100))
-    : Math.min(100, Math.round((totalMs / (8 * 3600000)) * 50));
+  const stageTotal = deepMs + remMs + lightMs;
+  const quality = stageTotal > 0
+    ? Math.min(100, Math.round(((deepMs / stageTotal) + (remMs / stageTotal) * 2.5) * 100))
+    : Math.min(100, Math.round((netSleepMs / (8 * 3600000)) * 50));
 
   return {
-    durationHours: totalMs / (1000 * 60 * 60),
+    durationHours: netSleepMs / (1000 * 60 * 60),
     quality,
   };
 }
@@ -415,7 +444,7 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
 
   // Calculate baseline BEFORE stress — needed for z-score computation
   const baseline = await calculateBaseline();
-  const calibrating = baseline.daysOfData < 7;
+  const calibrating = baseline.daysOfData < 3;
 
   // Stress level: z-score on ln(RMSSD) with contextual modifiers
   // During calibration (< 7 days), stress is null (not shown to user)
