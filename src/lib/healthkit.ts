@@ -315,37 +315,27 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     return false;
   }
 
-  // Detect all data sources and prefer wearable data over device/tablet data
+  // Log all data sources found (no filtering — Health Connect already provides
+  // validated data, and Samsung Watch data comes through Samsung Health packages
+  // which were incorrectly being filtered out as "device" sources)
   const allSamples = [...sleepSamples, ...stepsSamples, ...hrSamples, ...rhrSamples, ...hrvSamples, ...spo2Samples, ...rrSamples] as Array<{ source?: string }>;
   const sources = [...new Set(allSamples.map(s => s.source).filter(Boolean))];
   console.info('[healthkit] data sources found:', sources);
 
-  // Filter samples by preferred source (wearable > device)
-  // Known device/tablet packages to deprioritize
-  const devicePackages = ['com.sec.android.app.shealth', 'com.samsung.health', 'com.google.android.apps.fitness'];
-  const wearableSources = sources.filter(s => !devicePackages.some(dp => s!.includes(dp)));
-  const preferredSource = wearableSources.length > 0 ? wearableSources : sources;
+  // Use all samples from Health Connect — no source filtering
+  const fSleep = sleepSamples;
+  const fSteps = stepsSamples;
+  const fHr = hrSamples;
+  const fRhr = rhrSamples;
+  const fHrv = hrvSamples;
+  const fSpo2 = spo2Samples;
+  const fRr = rrSamples;
 
-  const filterBySource = <T extends { source?: string }>(samples: T[]): T[] => {
-    if (sources.length <= 1) return samples; // Only one source, no filtering needed
-    const filtered = samples.filter(s => !s.source || preferredSource.includes(s.source));
-    console.info('[healthkit] filtered samples:', { total: samples.length, afterFilter: filtered.length, preferredSource });
-    return filtered.length > 0 ? filtered : samples; // Fallback to all if filter removes everything
-  };
-
-  const fSleep = filterBySource(sleepSamples);
-  const fSteps = filterBySource(stepsSamples);
-  const fHr = filterBySource(hrSamples);
-  const fRhr = filterBySource(rhrSamples);
-  const fHrv = filterBySource(hrvSamples);
-  const fSpo2 = filterBySource(spo2Samples);
-  const fRr = filterBySource(rrSamples);
-
-  console.info('[healthkit] sync samples count (after source filter)', {
+  console.info('[healthkit] sync samples count', {
     sleep: fSleep.length, steps: fSteps.length,
     hr: fHr.length, rhr: fRhr.length, hrv: fHrv.length,
     spo2: fSpo2.length, rr: fRr.length,
-    platform: getPlatform(), preferredSource,
+    platform: getPlatform(), sources,
   });
 
   const { durationHours, quality: sleepQuality } = calculateSleepQuality(fSleep);
