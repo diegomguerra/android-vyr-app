@@ -26,9 +26,11 @@ const IntegrationsPage = () => {
 
   const isConnected = wearableConnection?.status === 'active' || wearableConnection?.status === 'connected';
 
-  // Auto-sync when entering the page if connected
+  // Auto-sync when connection status becomes available
+  const [autoSyncDone, setAutoSyncDone] = useState(false);
   useEffect(() => {
-    if (!isConnected) return;
+    if (!isConnected || autoSyncDone) return;
+    setAutoSyncDone(true);
     let cancelled = false;
     const autoSync = async () => {
       setSyncing(true);
@@ -40,7 +42,7 @@ const IntegrationsPage = () => {
     };
     autoSync();
     return () => { cancelled = true; };
-  }, []); // Only on mount
+  }, [isConnected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleConnect = async () => {
     setConnecting(true);

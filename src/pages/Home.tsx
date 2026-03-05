@@ -44,9 +44,11 @@ const Home = () => {
 
   const isHCConnected = wearableConnection?.status === 'active' || wearableConnection?.status === 'connected';
 
-  // Auto-sync Health Connect on Home mount if connected
+  // Auto-sync Health Connect when connection status becomes available
+  const [autoSyncDone, setAutoSyncDone] = useState(false);
   useEffect(() => {
-    if (!isHCConnected) return;
+    if (!isHCConnected || autoSyncDone) return;
+    setAutoSyncDone(true);
     let cancelled = false;
     const autoSync = async () => {
       setSyncingHC(true);
@@ -55,7 +57,7 @@ const Home = () => {
     };
     autoSync();
     return () => { cancelled = true; };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isHCConnected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const interpretation = useMemo(() => interpret(state), [state]);
   const phase = phaseConfig[state.phase];

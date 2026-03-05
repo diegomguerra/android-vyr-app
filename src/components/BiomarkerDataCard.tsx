@@ -36,7 +36,10 @@ const BiomarkerDataCard = ({ refreshKey }: BiomarkerDataCardProps) => {
       .eq('user_id', session.user.id)
       .eq('day', today)
       .maybeSingle()
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        if (error) {
+          console.error('[BiomarkerDataCard] query error:', error.message, error.code);
+        }
         if (data?.metrics) setMetrics(data.metrics as unknown as Metrics);
         setLoading(false);
       });

@@ -37,9 +37,13 @@ export interface VYRState {
 export interface BaselineValues {
   rhr?: { mean: number; std: number };
   hrv?: { mean: number; std: number };
+  /** HRV baseline in ln(RMSSD) domain for stress z-score */
+  hrvLn?: { mean: number; std: number } | null;
   sleepDuration?: { mean: number; std: number };
   sleepQuality?: { mean: number; std: number };
   spo2?: { mean: number; std: number };
+  /** Number of days used to compute baseline */
+  daysOfData?: number;
 }
 
 // Population fallback baseline

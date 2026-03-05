@@ -72,7 +72,6 @@ class HealthConnectPlugin : Plugin() {
                 Log.d(TAG, "Current permissions: ${granted.size}/${PERMISSIONS.size}")
 
                 if (granted.containsAll(PERMISSIONS)) {
-                    // All permissions already granted — resolve immediately
                     Log.d(TAG, "All permissions already granted")
                     val ret = JSObject()
                     ret.put("granted", true)
@@ -81,7 +80,6 @@ class HealthConnectPlugin : Plugin() {
                     return@launch
                 }
 
-                // Request missing permissions
                 Log.d(TAG, "Requesting missing permissions")
                 pendingPermissionCall = call
                 val launcher = com.vyrlabs.app.android.MainActivity.permissionLauncher
@@ -107,13 +105,18 @@ class HealthConnectPlugin : Plugin() {
                 val filter = TimeRangeFilter.between(Instant.parse(startDate), Instant.parse(endDate))
                 val response = client.readRecords(ReadRecordsRequest(StepsRecord::class, filter))
                 val samples = JSArray()
+                val sourceCounts = mutableMapOf<String, Int>()
                 for (r in response.records) {
+                    val source = r.metadata.dataOrigin.packageName
+                    sourceCounts[source] = (sourceCounts[source] ?: 0) + 1
                     val s = JSObject()
                     s.put("value", r.count)
                     s.put("startDate", r.startTime.toString())
                     s.put("endDate", r.endTime.toString())
+                    s.put("source", source)
                     samples.put(s)
                 }
+                Log.d(TAG, "readSteps: ${samples.length()} samples, sources=$sourceCounts")
                 val ret = JSObject()
                 ret.put("samples", samples)
                 call.resolve(ret)
@@ -134,15 +137,20 @@ class HealthConnectPlugin : Plugin() {
                 val filter = TimeRangeFilter.between(Instant.parse(startDate), Instant.parse(endDate))
                 val response = client.readRecords(ReadRecordsRequest(HeartRateRecord::class, filter))
                 val samples = JSArray()
+                val sourceCounts = mutableMapOf<String, Int>()
                 for (r in response.records) {
+                    val source = r.metadata.dataOrigin.packageName
                     for (s2 in r.samples) {
+                        sourceCounts[source] = (sourceCounts[source] ?: 0) + 1
                         val s = JSObject()
                         s.put("value", s2.beatsPerMinute)
                         s.put("startDate", s2.time.toString())
                         s.put("endDate", s2.time.toString())
+                        s.put("source", source)
                         samples.put(s)
                     }
                 }
+                Log.d(TAG, "readHeartRate: ${samples.length()} samples, sources=$sourceCounts")
                 val ret = JSObject()
                 ret.put("samples", samples)
                 call.resolve(ret)
@@ -163,13 +171,18 @@ class HealthConnectPlugin : Plugin() {
                 val filter = TimeRangeFilter.between(Instant.parse(startDate), Instant.parse(endDate))
                 val response = client.readRecords(ReadRecordsRequest(RestingHeartRateRecord::class, filter))
                 val samples = JSArray()
+                val sourceCounts = mutableMapOf<String, Int>()
                 for (r in response.records) {
+                    val source = r.metadata.dataOrigin.packageName
+                    sourceCounts[source] = (sourceCounts[source] ?: 0) + 1
                     val s = JSObject()
                     s.put("value", r.beatsPerMinute)
                     s.put("startDate", r.time.toString())
                     s.put("endDate", r.time.toString())
+                    s.put("source", source)
                     samples.put(s)
                 }
+                Log.d(TAG, "readRestingHeartRate: ${samples.length()} samples, sources=$sourceCounts")
                 val ret = JSObject()
                 ret.put("samples", samples)
                 call.resolve(ret)
@@ -190,13 +203,18 @@ class HealthConnectPlugin : Plugin() {
                 val filter = TimeRangeFilter.between(Instant.parse(startDate), Instant.parse(endDate))
                 val response = client.readRecords(ReadRecordsRequest(HeartRateVariabilityRmssdRecord::class, filter))
                 val samples = JSArray()
+                val sourceCounts = mutableMapOf<String, Int>()
                 for (r in response.records) {
+                    val source = r.metadata.dataOrigin.packageName
+                    sourceCounts[source] = (sourceCounts[source] ?: 0) + 1
                     val s = JSObject()
                     s.put("value", r.heartRateVariabilityMillis)
                     s.put("startDate", r.time.toString())
                     s.put("endDate", r.time.toString())
+                    s.put("source", source)
                     samples.put(s)
                 }
+                Log.d(TAG, "readHRV: ${samples.length()} samples, sources=$sourceCounts")
                 val ret = JSObject()
                 ret.put("samples", samples)
                 call.resolve(ret)
@@ -217,13 +235,18 @@ class HealthConnectPlugin : Plugin() {
                 val filter = TimeRangeFilter.between(Instant.parse(startDate), Instant.parse(endDate))
                 val response = client.readRecords(ReadRecordsRequest(OxygenSaturationRecord::class, filter))
                 val samples = JSArray()
+                val sourceCounts = mutableMapOf<String, Int>()
                 for (r in response.records) {
+                    val source = r.metadata.dataOrigin.packageName
+                    sourceCounts[source] = (sourceCounts[source] ?: 0) + 1
                     val s = JSObject()
                     s.put("value", r.percentage.value)
                     s.put("startDate", r.time.toString())
                     s.put("endDate", r.time.toString())
+                    s.put("source", source)
                     samples.put(s)
                 }
+                Log.d(TAG, "readSpO2: ${samples.length()} samples, sources=$sourceCounts")
                 val ret = JSObject()
                 ret.put("samples", samples)
                 call.resolve(ret)
@@ -244,13 +267,18 @@ class HealthConnectPlugin : Plugin() {
                 val filter = TimeRangeFilter.between(Instant.parse(startDate), Instant.parse(endDate))
                 val response = client.readRecords(ReadRecordsRequest(RespiratoryRateRecord::class, filter))
                 val samples = JSArray()
+                val sourceCounts = mutableMapOf<String, Int>()
                 for (r in response.records) {
+                    val source = r.metadata.dataOrigin.packageName
+                    sourceCounts[source] = (sourceCounts[source] ?: 0) + 1
                     val s = JSObject()
                     s.put("value", r.rate)
                     s.put("startDate", r.time.toString())
                     s.put("endDate", r.time.toString())
+                    s.put("source", source)
                     samples.put(s)
                 }
+                Log.d(TAG, "readRespiratoryRate: ${samples.length()} samples, sources=$sourceCounts")
                 val ret = JSObject()
                 ret.put("samples", samples)
                 call.resolve(ret)
@@ -272,21 +300,22 @@ class HealthConnectPlugin : Plugin() {
                 val response = client.readRecords(ReadRecordsRequest(SleepSessionRecord::class, filter))
                 val samples = JSArray()
                 for (r in response.records) {
+                    val source = r.metadata.dataOrigin.packageName
+                    val durationMin = java.time.Duration.between(r.startTime, r.endTime).toMinutes()
+                    Log.d(TAG, "readSleep session: ${r.startTime} → ${r.endTime} (${durationMin}min, ${r.stages.size} stages, source=$source)")
+
                     // Add overall session
                     val session = JSObject()
                     session.put("value", 0)
                     session.put("startDate", r.startTime.toString())
                     session.put("endDate", r.endTime.toString())
                     session.put("sleepState", "asleep")
+                    session.put("source", source)
                     samples.put(session)
 
-                    // Add individual sleep stages (deep, rem, light, awake)
+                    // Add individual sleep stages
                     for (stage in r.stages) {
-                        val st = JSObject()
-                        st.put("value", 0)
-                        st.put("startDate", stage.startTime.toString())
-                        st.put("endDate", stage.endTime.toString())
-                        st.put("sleepState", when (stage.stage) {
+                        val stageName = when (stage.stage) {
                             SleepSessionRecord.STAGE_TYPE_DEEP -> "deep"
                             SleepSessionRecord.STAGE_TYPE_REM -> "rem"
                             SleepSessionRecord.STAGE_TYPE_LIGHT -> "light"
@@ -295,7 +324,13 @@ class HealthConnectPlugin : Plugin() {
                             SleepSessionRecord.STAGE_TYPE_OUT_OF_BED -> "awake"
                             SleepSessionRecord.STAGE_TYPE_AWAKE_IN_BED -> "inBed"
                             else -> "light"
-                        })
+                        }
+                        val st = JSObject()
+                        st.put("value", 0)
+                        st.put("startDate", stage.startTime.toString())
+                        st.put("endDate", stage.endTime.toString())
+                        st.put("sleepState", stageName)
+                        st.put("source", source)
                         samples.put(st)
                     }
                 }

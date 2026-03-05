@@ -6,6 +6,7 @@ import type { IHealthProvider, SleepSample } from './health-provider';
 import { computeState } from './vyr-engine';
 import type { BiometricData } from './vyr-engine';
 import { calculateBaseline } from './vyr-baseline';
+import type { BaselineMetrics } from './vyr-baseline';
 import { getLocalToday } from './date-utils';
 
 let _provider: IHealthProvider | null = null;
@@ -95,28 +96,44 @@ export function calculateSleepQuality(samples: SleepSample[]): { durationHours: 
   // Stage-level samples give quality breakdown (deep/rem/light)
   const stages = samples.filter((s) => s.sleepState && s.sleepState !== 'asleep' && s.sleepState !== 'awake' && s.sleepState !== 'inBed');
 
-  // Duration from sessions only (avoids double-counting with stages)
-  let totalMs = 0;
+  // Duration from sessions
+  let sessionMs = 0;
   for (const s of sessions) {
     const ms = new Date(s.endDate).getTime() - new Date(s.startDate).getTime();
-    if (ms > 0) totalMs += ms;
+    if (ms > 0) sessionMs += ms;
+    console.log('[healthkit] sleep session:', s.startDate, '→', s.endDate, '=', Math.round(ms / 60000), 'min');
   }
+
+  // Duration from stages (deep + rem + light = actual sleep time)
+  let stageMs = 0, deepMs = 0, remMs = 0, lightMs = 0;
+  for (const s of stages) {
+    const ms = new Date(s.endDate).getTime() - new Date(s.startDate).getTime();
+    if (ms > 0) stageMs += ms;
+    if (s.sleepState === 'deep') deepMs += ms;
+    if (s.sleepState === 'rem') remMs += ms;
+    if (s.sleepState === 'light') lightMs += ms;
+  }
+
+  // Use the larger of session vs stage duration — handles fragmented sessions
+  // and apps that write stages covering more time than the session wrapper
+  const totalMs = Math.max(sessionMs, stageMs);
+
+  console.log('[healthkit] sleep calc:', {
+    sessions: sessions.length, stages: stages.length,
+    sessionMin: Math.round(sessionMs / 60000),
+    stageMin: Math.round(stageMs / 60000),
+    totalMin: Math.round(totalMs / 60000),
+    deepMin: Math.round(deepMs / 60000),
+    remMin: Math.round(remMs / 60000),
+    lightMin: Math.round(lightMs / 60000),
+  });
+
   if (totalMs === 0) return { durationHours: 0, quality: 0 };
 
   // Quality from stage breakdown if available
-  let deepMs = 0, remMs = 0;
-  for (const s of stages) {
-    const ms = new Date(s.endDate).getTime() - new Date(s.startDate).getTime();
-    if (s.sleepState === 'deep') deepMs += ms;
-    if (s.sleepState === 'rem') remMs += ms;
-  }
-
-  // If no stage data, estimate 50% quality based on duration alone
   const quality = stages.length > 0
     ? Math.min(100, Math.round(((deepMs / totalMs) + (remMs / totalMs) * 2.5) * 100))
     : Math.min(100, Math.round((totalMs / (8 * 3600000)) * 50));
-
-  console.log('[healthkit] sleep calc:', { sessions: sessions.length, stages: stages.length, totalMs, deepMs, remMs, quality });
 
   return {
     durationHours: totalMs / (1000 * 60 * 60),
@@ -145,38 +162,59 @@ function deriveRHR(hrSamples: { value: number }[]): number | undefined {
 }
 
 /**
- * Derive pseudo-RMSSD HRV from consecutive HR samples (approximation).
- * WARNING: This is a rough estimate from aggregated BPM, not beat-to-beat intervals.
- * Requires >= 10 samples for minimal statistical significance.
- * Returns undefined if samples are too sparse (> 5 min avg spacing).
+ * Compute stress level using z-score on ln(RMSSD) with contextual modifiers.
+ * Follows spec Part 4: z-score clamped to [-3,+3], mapped linearly.
+ * Rule 3: returns null during calibration.
+ * Rule 7: returns 50 (neutral) when HRV is unavailable but calibrated.
  */
-function derivePseudoHRV(hrSamples: { value: number; startDate?: string }[]): number | undefined {
-  const valid = hrSamples.filter(s => !isNaN(s.value) && s.value > 30 && s.value < 220);
-  if (valid.length < 10) return undefined;
+function computeStressLevel(
+  avgHrv: number | undefined,
+  baseline: BaselineMetrics,
+  avgRhr: number | undefined,
+  sleepDurationHours: number,
+  avgRR: number | undefined
+): number {
+  // Rule 7: no HRV data → neutral score (50), don't alarm or reassure
+  if (avgHrv == null) return 50;
 
-  // Check temporal spacing — if samples are > 5 min apart on average, resolution is too low
-  if (valid[0]?.startDate && valid[valid.length - 1]?.startDate) {
-    const firstTs = new Date(valid[0].startDate).getTime();
-    const lastTs = new Date(valid[valid.length - 1].startDate).getTime();
-    const spanMs = Math.abs(lastTs - firstTs);
-    if (spanMs > 0) {
-      const avgSpacingMin = (spanMs / (valid.length - 1)) / 60000;
-      if (avgSpacingMin > 5) {
-        console.warn('[healthkit] derivePseudoHRV: samples too sparse (avg spacing %.1f min), skipping', avgSpacingMin);
-        return undefined;
-      }
+  // 1. ln(RMSSD) of current value
+  const lnHrv = Math.log(Math.max(5, Math.min(250, avgHrv)));
+
+  // 2. Use individual baseline in ln domain, or population fallback
+  const bl = baseline.hrvLn ?? { mean: Math.log(40), std: 0.4 };
+
+  // 3. z-score of ln(RMSSD)
+  const z = bl.std > 0.01 ? (lnHrv - bl.mean) / bl.std : 0;
+
+  // 4. Base score: z-score clamped to [-3,+3], mapped linearly (spec Part 4.2)
+  //    z = -3 → stress 100, z = 0 → stress 50, z = +3 → stress 0
+  const clamped = Math.max(-3, Math.min(3, z));
+  let stress = Math.round(((-clamped + 3) / 6) * 100);
+
+  // 5. Contextual modifiers (spec Part 4.2)
+  // Resting HR: delta > 3bpm above baseline → modifier, max +15
+  if (avgRhr && baseline.rhr && baseline.rhr.std > 0.01) {
+    const delta = avgRhr - baseline.rhr.mean;
+    if (delta > 3) {
+      stress += Math.round(Math.min((delta - 3) * 2, 15));
     }
   }
-
-  // Convert BPM to RR intervals (ms), compute successive differences
-  const rrIntervals = valid.map(s => 60000 / s.value);
-  let sumSqDiff = 0;
-  for (let i = 1; i < rrIntervals.length; i++) {
-    const diff = rrIntervals[i] - rrIntervals[i - 1];
-    sumSqDiff += diff * diff;
+  // Sleep duration: deficit > 0.5h vs baseline → modifier, max +10
+  if (sleepDurationHours > 0 && baseline.sleepDuration) {
+    const deficit = baseline.sleepDuration.mean - sleepDurationHours;
+    if (deficit > 0.5) {
+      stress += Math.round(Math.min(deficit * 4, 10));
+    }
   }
-  const rmssd = Math.sqrt(sumSqDiff / (rrIntervals.length - 1));
-  return rmssd > 0 ? Math.round(rmssd * 10) / 10 : undefined;
+  // Respiratory rate: elevation above normal range → modifier, max +8
+  // Spec: delta > baseline SD. Without dedicated respRate baseline,
+  // use population mean 15rpm + 1 SD (3rpm) = 18rpm as threshold.
+  if (avgRR && avgRR > 18) {
+    const delta = avgRR - 18;
+    stress += Math.round(Math.min(delta * 1.5, 8));
+  }
+
+  return Math.max(0, Math.min(100, stress));
 }
 
 let observerListenerBound = false;
@@ -242,6 +280,11 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   const permissionsOk = await provider.requestPermissions();
   console.info('[healthkit] permissions check before sync:', permissionsOk);
 
+  if (!permissionsOk) {
+    console.warn('[healthkit] sync aborted: permissions not granted');
+    return false;
+  }
+
   const userId = await requireValidUserId();
 
   // Use local date for the day key and local midnight for the start window
@@ -271,15 +314,42 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     console.warn('[healthkit] sync aborted: no data from any source (permissions may be missing)');
     return false;
   }
-  console.info('[healthkit] sync samples count', {
-    sleep: sleepSamples.length, steps: stepsSamples.length,
-    hr: hrSamples.length, rhr: rhrSamples.length, hrv: hrvSamples.length,
-    spo2: spo2Samples.length, rr: rrSamples.length,
-    platform: getPlatform(), source: provider.getSourceProvider(),
+
+  // Detect all data sources and prefer wearable data over device/tablet data
+  const allSamples = [...sleepSamples, ...stepsSamples, ...hrSamples, ...rhrSamples, ...hrvSamples, ...spo2Samples, ...rrSamples] as Array<{ source?: string }>;
+  const sources = [...new Set(allSamples.map(s => s.source).filter(Boolean))];
+  console.info('[healthkit] data sources found:', sources);
+
+  // Filter samples by preferred source (wearable > device)
+  // Known device/tablet packages to deprioritize
+  const devicePackages = ['com.sec.android.app.shealth', 'com.samsung.health', 'com.google.android.apps.fitness'];
+  const wearableSources = sources.filter(s => !devicePackages.some(dp => s!.includes(dp)));
+  const preferredSource = wearableSources.length > 0 ? wearableSources : sources;
+
+  const filterBySource = <T extends { source?: string }>(samples: T[]): T[] => {
+    if (sources.length <= 1) return samples; // Only one source, no filtering needed
+    const filtered = samples.filter(s => !s.source || preferredSource.includes(s.source));
+    console.info('[healthkit] filtered samples:', { total: samples.length, afterFilter: filtered.length, preferredSource });
+    return filtered.length > 0 ? filtered : samples; // Fallback to all if filter removes everything
+  };
+
+  const fSleep = filterBySource(sleepSamples);
+  const fSteps = filterBySource(stepsSamples);
+  const fHr = filterBySource(hrSamples);
+  const fRhr = filterBySource(rhrSamples);
+  const fHrv = filterBySource(hrvSamples);
+  const fSpo2 = filterBySource(spo2Samples);
+  const fRr = filterBySource(rrSamples);
+
+  console.info('[healthkit] sync samples count (after source filter)', {
+    sleep: fSleep.length, steps: fSteps.length,
+    hr: fHr.length, rhr: fRhr.length, hrv: fHrv.length,
+    spo2: fSpo2.length, rr: fRr.length,
+    platform: getPlatform(), preferredSource,
   });
 
-  const { durationHours, quality: sleepQuality } = calculateSleepQuality(sleepSamples);
-  const totalSteps = stepsSamples.map(s => s.value).reduce((a, b) => a + b, 0);
+  const { durationHours, quality: sleepQuality } = calculateSleepQuality(fSleep);
+  const totalSteps = fSteps.map(s => s.value).reduce((a, b) => a + b, 0);
 
   // Average for biometric values (filter NaN only, allow zeros for steps)
   const bioAvg = (samples: { value: number }[], minVal = 0) => {
@@ -288,16 +358,27 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   };
 
   // Use dedicated metrics if available, otherwise derive from general HR samples
-  const avgHr = bioAvg(hrSamples, 30);   // HR must be >= 30 bpm
-  const avgRhr = bioAvg(rhrSamples, 30) ?? deriveRHR(hrSamples);
-  const avgHrv = bioAvg(hrvSamples, 1) ?? derivePseudoHRV(hrSamples);  // HRV must be >= 1ms
-  const avgSpo2 = bioAvg(spo2Samples, 50); // SpO2 must be >= 50%
-  const avgRR = bioAvg(rrSamples, 5);      // RR must be >= 5 breaths/min
+  const avgHr = bioAvg(fHr, 30);   // HR must be >= 30 bpm
+  const avgRhr = bioAvg(fRhr, 30) ?? deriveRHR(fHr);
+  // Filter HRV artifacts: only accept physiological range 5-250ms
+  const hrvFiltered = fHrv.filter(s => s.value >= 5 && s.value <= 250);
+  const avgHrv = hrvFiltered.length > 0
+    ? hrvFiltered.map(s => s.value).reduce((a, b) => a + b, 0) / hrvFiltered.length
+    : undefined;
+  const avgSpo2 = bioAvg(fSpo2, 50); // SpO2 must be >= 50%
+  const avgRR = bioAvg(fRr, 5);      // RR must be >= 5 breaths/min
 
-  // Derive stress level from HRV (lower HRV = higher stress, scale 0-100)
-  const stressLevel = avgHrv != null ? Math.max(0, Math.min(100, Math.round(100 - convertHRVtoScale(avgHrv)))) : null;
+  // Calculate baseline BEFORE stress — needed for z-score computation
+  const baseline = await calculateBaseline();
+  const calibrating = baseline.daysOfData < 7;
 
-  console.info('[healthkit] derived metrics:', { avgHr, avgRhr, avgHrv, stressLevel, avgSpo2, avgRR, durationHours, sleepQuality });
+  // Stress level: z-score on ln(RMSSD) with contextual modifiers
+  // During calibration (< 7 days), stress is null (not shown to user)
+  const stressLevel = calibrating
+    ? null
+    : computeStressLevel(avgHrv, baseline, avgRhr, durationHours, avgRR);
+
+  console.info('[healthkit] derived metrics:', { avgHr, avgRhr, avgHrv, stressLevel, avgSpo2, avgRR, durationHours, sleepQuality, calibrating, daysOfData: baseline.daysOfData });
 
   const metrics = {
     hr_avg: avgHr ? Math.round(avgHr) : null,
@@ -312,6 +393,7 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     steps: totalSteps,
     spo2: avgSpo2 ? Math.round(avgSpo2 * 10) / 10 : null,
     respiratory_rate: avgRR ? Math.round(avgRR * 10) / 10 : null,
+    calibrating,
   };
 
   const sourceProvider = provider.getSourceProvider();
@@ -365,7 +447,6 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
       subjectiveStability: existingInput.subjectiveStability,
     };
 
-    const baseline = await calculateBaseline();
     const vyrState = computeState(mergedData, baseline);
 
     console.info('[healthkit] auto-computed VYR state:', vyrState);

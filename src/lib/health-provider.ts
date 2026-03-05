@@ -14,6 +14,7 @@ export interface BridgeSample {
   value: number;
   startDate: string;
   endDate: string;
+  source?: string;
   [key: string]: unknown;
 }
 
@@ -22,6 +23,7 @@ export interface SleepSample {
   endDate: string;
   sleepState?: string;
   value: number;
+  source?: string;
 }
 
 export interface IHealthProvider {

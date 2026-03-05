@@ -22,8 +22,9 @@ export class AndroidHealthProvider implements IHealthProvider {
   async requestPermissions(): Promise<boolean> {
     try {
       const result = await HealthConnect.requestPermissions();
-      console.log('[health-android] requestPermissions:', JSON.stringify(result));
-      return true;
+      const granted = result?.granted === true || result?.alreadyGranted === true;
+      console.log('[health-android] requestPermissions:', JSON.stringify(result), '| granted:', granted);
+      return granted;
     } catch (e) {
       console.error('[health-android] requestPermissions error:', e);
       return false;
