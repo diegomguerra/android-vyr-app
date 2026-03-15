@@ -1,5 +1,5 @@
-// VYR State Engine — Core Algorithm v2
-// Implements z-score baseline, dynamic weights, rich labels
+// VYR State Engine — Core Algorithm v3
+// Implements z-score baseline, dynamic weights, wider oscillation, rich labels
 
 export interface BiometricData {
   rhr?: number;           // Resting Heart Rate (bpm)
@@ -77,7 +77,7 @@ export function validateWearableData(data: BiometricData): BiometricData {
   return {
     ...data,
     rhr: data.rhr != null ? clamp(data.rhr, 35, 120) : undefined,
-    hrvIndex: data.hrvIndex != null ? clamp(data.hrvIndex, 0, 100) : 
+    hrvIndex: data.hrvIndex != null ? clamp(data.hrvIndex, 0, 100) :
               data.hrvRawMs != null ? normalizeHRV(data.hrvRawMs) : undefined,
     sleepDuration: data.sleepDuration != null ? clamp(data.sleepDuration, 0, 14) : undefined,
     sleepQuality: data.sleepQuality != null ? clamp(data.sleepQuality, 0, 100) : undefined,
@@ -94,18 +94,22 @@ export function validateWearableData(data: BiometricData): BiometricData {
 }
 
 /**
- * Compute z-score clamped to [-2, +2]
+ * Compute z-score clamped to [-2.5, +2.5]
+ * Wider clamp than v2 (-2) to allow more score oscillation.
  */
 function zScore(value: number, mean: number, std: number): number {
   if (std < 0.01) return 0;
-  return clamp((value - mean) / std, -2, 2);
+  return clamp((value - mean) / std, -2.5, 2.5);
 }
 
 /**
- * Convert z-score to pillar contribution (range -1.5 to +1.5)
+ * Convert z-score to pillar contribution.
+ * v3: multiplier 1.0 (was 0.75) for full z-score impact.
+ * With z clamp [-2.5,+2.5], contribution range is [-2.5, +2.5].
+ * Combined with base 2.5, pillars can reach full 0-5 range.
  */
 function zToPillar(z: number): number {
-  return z * 0.75;
+  return z * 1.0;
 }
 
 interface WeightedInput {
@@ -125,7 +129,7 @@ export function computePillars(data: BiometricData, baseline?: BaselineValues): 
   const validated = validateWearableData(data);
   const bl = { ...FALLBACK_BASELINE, ...baseline };
 
-  // === ENERGIA (base 3.0, target weight 2.5) ===
+  // === ENERGIA (base 2.5, target weight 2.5) ===
   const energiaInputs: WeightedInput[] = [];
   if (validated.rhr != null && bl.rhr) {
     // Inverted: below mean = good
@@ -146,12 +150,12 @@ export function computePillars(data: BiometricData, baseline?: BaselineValues): 
     energiaInputs.push({ value: zToPillar(zScore(validated.subjectiveEnergy, 5, 2)), weight: 0.6 });
   }
 
-  let energia = dynamicWeightedAvg(energiaInputs, 2.5, 3.0);
+  let energia = dynamicWeightedAvg(energiaInputs, 2.5, 2.5);
   // Activity adjustment
   if (validated.activityLevel === 'high') energia = clamp(energia - 0.5, 0, 5);
   else if (validated.activityLevel === 'low') energia = clamp(energia + 0.25, 0, 5);
 
-  // === CLAREZA (base 3.0, target weight 2.5) ===
+  // === CLAREZA (base 2.5, target weight 2.5) ===
   const clarezaInputs: WeightedInput[] = [];
   if (validated.sleepRegularity != null) {
     // Inverted: less variation = better
@@ -174,9 +178,9 @@ export function computePillars(data: BiometricData, baseline?: BaselineValues): 
     clarezaInputs.push({ value: zToPillar(zScore(validated.subjectiveFocus, 5, 2)), weight: 0.5 });
   }
 
-  const clareza = dynamicWeightedAvg(clarezaInputs, 2.5, 3.0);
+  const clareza = dynamicWeightedAvg(clarezaInputs, 2.5, 2.5);
 
-  // === ESTABILIDADE (base 3.0, target weight 2.0) ===
+  // === ESTABILIDADE (base 2.5, target weight 2.0) ===
   const estabInputs: WeightedInput[] = [];
   if (validated.hrvIndex != null && bl.hrv) {
     estabInputs.push({ value: zToPillar(zScore(validated.hrvIndex, bl.hrv.mean, bl.hrv.std)), weight: 1.3 });
@@ -196,7 +200,7 @@ export function computePillars(data: BiometricData, baseline?: BaselineValues): 
     estabInputs.push({ value: zToPillar(zScore(validated.subjectiveStability, 5, 2)), weight: 0.5 });
   }
 
-  const estabilidade = dynamicWeightedAvg(estabInputs, 2.0, 3.0);
+  const estabilidade = dynamicWeightedAvg(estabInputs, 2.0, 2.5);
 
   return {
     energia: Math.round(energia * 100) / 100,

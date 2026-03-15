@@ -141,12 +141,17 @@ export function useVYRStore() {
           .then(() => console.info('[store] integration reset after version change'));
       }
     } else if (integrationRes.data) {
+      const status = integrationRes.data.status;
       setWearableConnection({
         provider: integrationRes.data.provider,
-        status: integrationRes.data.status,
+        status,
         lastSyncAt: integrationRes.data.last_sync_at,
         scopes: integrationRes.data.scopes || [],
       });
+      // Re-enable background sync on load if integration is active (iOS observers)
+      if (status === 'active' || status === 'connected') {
+        enableHealthKitBackgroundSync().catch(() => {});
+      }
     }
 
     // Name

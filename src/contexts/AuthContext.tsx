@@ -20,7 +20,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     // Force re-login when APK version changes
-    const APP_VERSION = '1.2.0';
+    const APP_VERSION = '1.3.0';
     const STORED_VERSION_KEY = 'vyr_app_version';
     const storedVersion = localStorage.getItem(STORED_VERSION_KEY);
     if (storedVersion && storedVersion !== APP_VERSION) {

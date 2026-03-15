@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TrendingUp, TrendingDown, Minus, ChevronRight, Play, Activity, Check, Heart, RefreshCw } from 'lucide-react';
 import StateRing from '@/components/StateRing';
@@ -43,21 +43,6 @@ const Home = () => {
   const [syncingHC, setSyncingHC] = useState(false);
 
   const isHCConnected = wearableConnection?.status === 'active' || wearableConnection?.status === 'connected';
-
-  // Auto-sync Health Connect when connection status becomes available
-  const [autoSyncDone, setAutoSyncDone] = useState(false);
-  useEffect(() => {
-    if (!isHCConnected || autoSyncDone) return;
-    setAutoSyncDone(true);
-    let cancelled = false;
-    const autoSync = async () => {
-      setSyncingHC(true);
-      await syncWearable();
-      if (!cancelled) setSyncingHC(false);
-    };
-    autoSync();
-    return () => { cancelled = true; };
-  }, [isHCConnected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const interpretation = useMemo(() => interpret(state), [state]);
   const phase = phaseConfig[state.phase];

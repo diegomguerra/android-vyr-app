@@ -228,8 +228,8 @@ function derivePseudoHRV(hrSamples: { value: number; startDate?: string }[]): nu
 /**
  * Compute stress level using z-score on ln(RMSSD) with contextual modifiers.
  * Follows spec Part 4: z-score clamped to [-3,+3], mapped linearly.
- * Rule 3: returns null during calibration.
- * Rule 7: returns 50 (neutral) when HRV is unavailable but calibrated.
+ * Uses population baseline fallback (ln(40), std 0.4) when personal baseline unavailable.
+ * Returns 50 (neutral) when HRV is unavailable.
  */
 function computeStressLevel(
   avgHrv: number | undefined,
@@ -284,22 +284,27 @@ function computeStressLevel(
 let observerListenerBound = false;
 
 export async function enableHealthKitBackgroundSync(): Promise<void> {
-  if (getPlatform() !== 'ios') return;
-  try {
-    const { VYRHealthBridge } = await import('./healthkit-bridge');
-    const ALL_TYPES = [...HEALTH_READ_TYPES, ...BRIDGE_READ_TYPES, ...BRIDGE_ONLY_WRITE_TYPES];
-    for (const type of ALL_TYPES) {
-      await VYRHealthBridge.enableBackgroundDelivery({ type, frequency: 'hourly' });
+  const platform = getPlatform();
+  if (platform === 'ios') {
+    try {
+      const { VYRHealthBridge } = await import('./healthkit-bridge');
+      const ALL_TYPES = [...HEALTH_READ_TYPES, ...BRIDGE_READ_TYPES, ...BRIDGE_ONLY_WRITE_TYPES];
+      for (const type of ALL_TYPES) {
+        await VYRHealthBridge.enableBackgroundDelivery({ type, frequency: 'hourly' });
+      }
+      await VYRHealthBridge.registerObserverQueries({ types: ALL_TYPES.map(String) });
+      if (!observerListenerBound) {
+        observerListenerBound = true;
+        await VYRHealthBridge.addListener('healthkitObserverUpdated', () => { void runIncrementalHealthSync('observer'); });
+        await VYRHealthBridge.addListener('healthkitObserverError', (event) => { console.error('[healthkit] observer error', event); });
+      }
+    } catch (error) {
+      console.error('[healthkit] enable background delivery failed', error);
     }
-    await VYRHealthBridge.registerObserverQueries({ types: ALL_TYPES.map(String) });
-    if (!observerListenerBound) {
-      observerListenerBound = true;
-      await VYRHealthBridge.addListener('healthkitObserverUpdated', () => { void runIncrementalHealthSync('observer'); });
-      await VYRHealthBridge.addListener('healthkitObserverError', (event) => { console.error('[healthkit] observer error', event); });
-    }
-  } catch (error) {
-    console.error('[healthkit] enable background delivery failed', error);
   }
+  // Android: background sync is managed by useHealthSync hook
+  // (app state listeners + periodic interval)
+  console.info('[healthkit] background sync enabled for platform:', platform);
 }
 
 export async function runIncrementalHealthSync(trigger: 'manual' | 'observer' = 'manual'): Promise<boolean> {
@@ -447,10 +452,8 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   const calibrating = baseline.daysOfData < 3;
 
   // Stress level: z-score on ln(RMSSD) with contextual modifiers
-  // During calibration (< 7 days), stress is null (not shown to user)
-  const stressLevel = calibrating
-    ? null
-    : computeStressLevel(avgHrv, baseline, avgRhr, durationHours, avgRR);
+  // Always calculate — uses population baseline fallback when personal baseline unavailable
+  const stressLevel = computeStressLevel(avgHrv, baseline, avgRhr, durationHours, avgRR);
 
   console.info('[healthkit] derived metrics:', { avgHr, avgRhr, avgHrv, stressLevel, avgSpo2, avgRR, durationHours, sleepQuality, calibrating, daysOfData: baseline.daysOfData });
 

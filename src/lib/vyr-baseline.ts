@@ -23,11 +23,31 @@ interface MetricsData {
   spo2?: number | null;
 }
 
-function computeMeanStd(values: number[]): { mean: number; std: number } | null {
+/**
+ * Minimum std floors to prevent baseline from collapsing when data is
+ * too consistent (e.g., first 7 days with similar readings).
+ * Without floors, z-scores become extreme for tiny deviations,
+ * or always hit the clamp, killing real score variation.
+ */
+const MIN_STD: Record<string, number> = {
+  rhr: 3,            // bpm — 3 bpm variation is normal day-to-day
+  hrv: 6,            // index units (0-100 scale)
+  hrvLn: 0.25,       // ln domain
+  sleepDuration: 0.4, // hours — 24 min variation is realistic
+  sleepQuality: 8,    // quality points
+  spo2: 0.8,         // percentage points
+};
+
+function computeMeanStd(values: number[], minStdKey?: string): { mean: number; std: number } | null {
   if (values.length === 0) return null;
   const mean = values.reduce((a, b) => a + b, 0) / values.length;
   const variance = values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / values.length;
-  return { mean: Math.round(mean * 100) / 100, std: Math.round(Math.sqrt(variance) * 100) / 100 };
+  let std = Math.sqrt(variance);
+  // Apply minimum std floor to prevent collapsed baselines
+  if (minStdKey && MIN_STD[minStdKey]) {
+    std = Math.max(std, MIN_STD[minStdKey]);
+  }
+  return { mean: Math.round(mean * 100) / 100, std: Math.round(std * 100) / 100 };
 }
 
 /**
@@ -78,15 +98,18 @@ export async function calculateBaseline(): Promise<BaselineMetrics> {
   const sleepQualVals = metrics.map((m) => m.sleep_quality).filter((v): v is number => v != null);
   const spo2Vals = metrics.map((m) => m.spo2).filter((v): v is number => v != null);
 
-  return {
-    rhr: computeMeanStd(rhrVals),
-    hrv: computeMeanStd(hrvIndexVals),
-    hrvLn: computeMeanStd(hrvLnVals),
-    sleepDuration: computeMeanStd(sleepDurVals),
-    sleepQuality: computeMeanStd(sleepQualVals),
-    spo2: computeMeanStd(spo2Vals),
+  const result: BaselineMetrics = {
+    rhr: computeMeanStd(rhrVals, 'rhr'),
+    hrv: computeMeanStd(hrvIndexVals, 'hrv'),
+    hrvLn: computeMeanStd(hrvLnVals, 'hrvLn'),
+    sleepDuration: computeMeanStd(sleepDurVals, 'sleepDuration'),
+    sleepQuality: computeMeanStd(sleepQualVals, 'sleepQuality'),
+    spo2: computeMeanStd(spo2Vals, 'spo2'),
     daysOfData: metrics.length,
   };
+
+  console.info('[baseline] computed from', metrics.length, 'days:', result);
+  return result;
 }
 
 /**
