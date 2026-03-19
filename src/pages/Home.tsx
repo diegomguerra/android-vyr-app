@@ -1,6 +1,6 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { TrendingUp, TrendingDown, Minus, ChevronRight, Play, AlertCircle, Check, Heart, RefreshCw } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus, ChevronRight, Play, AlertCircle, Heart, RefreshCw } from 'lucide-react';
 import StateRing from '@/components/StateRing';
 import TransitionCard from '@/components/TransitionCard';
 import SachetConfirmation from '@/components/SachetConfirmation';
@@ -391,32 +391,7 @@ const Home = () => {
               const phaseComplete = doseRegistered && perceptionRegistered;
 
               if (phaseComplete) {
-                // Current dose done — show next phase info
-                const nextPhases = { BOOT: 'HOLD', HOLD: 'CLEAR', CLEAR: null } as const;
-                const next = nextPhases[activeDose];
-                if (next) {
-                  const nextWindow = getPhaseTimeWindow(next);
-                  return (
-                    <div className="rounded-2xl p-4 text-center space-y-1" style={{ background: '#0E0E0E', border: '1px solid #1A1A1A' }}>
-                      <div className="flex items-center justify-center gap-2">
-                        <Check size={16} style={{ color: activeConfig.color }} />
-                        <span className="text-sm font-medium text-foreground">{activeDose} registrado</span>
-                      </div>
-                      <p className="text-xs" style={{ fontWeight: 400, color: '#667788' }}>
-                        Próxima fase: <span className="text-foreground" style={{ fontWeight: 500 }}>{next}</span> a partir das {nextWindow.label.split('–')[0]}
-                      </p>
-                    </div>
-                  );
-                }
-                return (
-                  <div className="rounded-2xl p-4 text-center space-y-1" style={{ background: '#0E0E0E', border: '1px solid #1A1A1A' }}>
-                    <div className="flex items-center justify-center gap-2">
-                      <Check size={16} style={{ color: activeConfig.color }} />
-                      <span className="text-sm font-medium text-foreground">Protocolo do dia completo</span>
-                    </div>
-                    <p className="text-xs" style={{ fontWeight: 400, color: '#667788' }}>Todas as fases foram registradas.</p>
-                  </div>
-                );
+                return null;
               }
 
               // Show CTA for active dose phase
