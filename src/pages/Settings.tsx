@@ -131,15 +131,24 @@ const SettingsPage = () => {
             <Shield size={20} className="text-muted-foreground" strokeWidth={1.8} />
             <div className="flex-1">
               <span className="text-sm text-foreground">Baseline pessoal</span>
-              <p className="text-[10px] text-muted-foreground">{baselineDays}/7 dias registrados</p>
+              <p className="text-[10px] text-muted-foreground">
+                {baselineDays >= 7
+                  ? 'Calibrado — scores personalizados ativos'
+                  : `Aprendendo seu padrão: ${baselineDays}/7 dias`}
+              </p>
             </div>
+            {baselineDays >= 7 && (
+              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full" style={{ background: 'hsl(var(--vyr-accent-stable) / 0.15)', color: 'hsl(var(--vyr-accent-stable))' }}>
+                Ativo
+              </span>
+            )}
           </div>
           <div className="h-1.5 rounded-full bg-muted overflow-hidden ml-8">
             <div
               className="h-full rounded-full transition-all"
               style={{
                 width: `${(baselineDays / 7) * 100}%`,
-                background: 'hsl(var(--vyr-accent-action))',
+                background: baselineDays >= 7 ? 'hsl(var(--vyr-accent-stable))' : 'hsl(var(--vyr-accent-action))',
               }}
             />
           </div>

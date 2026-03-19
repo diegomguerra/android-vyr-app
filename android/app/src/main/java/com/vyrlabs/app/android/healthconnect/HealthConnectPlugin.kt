@@ -25,13 +25,19 @@ class HealthConnectPlugin : Plugin() {
 
     companion object {
         private var pendingPermissionCall: PluginCall? = null
+        private var requiredPermissions: Set<String> = emptySet()
 
         @JvmStatic
         fun onPermissionsResult(granted: Set<String>) {
             val call = pendingPermissionCall ?: return
             pendingPermissionCall = null
             val ret = JSObject()
-            ret.put("granted", granted.isNotEmpty())
+            // Check that ALL required permissions were granted, not just any
+            val allGranted = granted.containsAll(requiredPermissions)
+            ret.put("granted", allGranted)
+            ret.put("grantedCount", granted.size)
+            ret.put("requiredCount", requiredPermissions.size)
+            Log.d("HealthConnectPlugin", "onPermissionsResult: granted=${granted.size}/${requiredPermissions.size}, allGranted=$allGranted")
             call.resolve(ret)
         }
     }
@@ -63,6 +69,32 @@ class HealthConnectPlugin : Plugin() {
         }
     }
 
+    /**
+     * Silently check if all required Health Connect permissions are granted.
+     * Never shows a dialog — safe for auto-reconnect and background syncs.
+     */
+    @PluginMethod
+    fun hasAllPermissions(call: PluginCall) {
+        scope.launch {
+            try {
+                val client = getClient()
+                val granted = client.permissionController.getGrantedPermissions()
+                val allGranted = granted.containsAll(PERMISSIONS)
+                Log.d(TAG, "hasAllPermissions: ${granted.size}/${PERMISSIONS.size}, allGranted=$allGranted")
+                val ret = JSObject()
+                ret.put("granted", allGranted)
+                ret.put("grantedCount", granted.size)
+                ret.put("requiredCount", PERMISSIONS.size)
+                call.resolve(ret)
+            } catch (e: Exception) {
+                Log.e(TAG, "hasAllPermissions error", e)
+                val ret = JSObject()
+                ret.put("granted", false)
+                call.resolve(ret)
+            }
+        }
+    }
+
     @PluginMethod
     override fun requestPermissions(call: PluginCall) {
         scope.launch {
@@ -82,6 +114,7 @@ class HealthConnectPlugin : Plugin() {
 
                 Log.d(TAG, "Requesting missing permissions")
                 pendingPermissionCall = call
+                requiredPermissions = PERMISSIONS
                 val launcher = com.vyrlabs.app.android.MainActivity.permissionLauncher
                 activity.runOnUiThread {
                     launcher.launch(PERMISSIONS)

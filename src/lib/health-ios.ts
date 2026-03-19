@@ -42,6 +42,13 @@ export class IOSHealthProvider implements IHealthProvider {
     }
   }
 
+  async checkPermissions(): Promise<boolean> {
+    // iOS HealthKit doesn't expose a reliable silent permission check.
+    // Once authorized, permissions persist, so we return true optimistically.
+    // If data reads return empty, sync logic handles it gracefully.
+    return true;
+  }
+
   async requestPermissions(): Promise<boolean> {
     try {
       const Health = await getHealth();

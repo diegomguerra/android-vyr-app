@@ -1,11 +1,7 @@
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { TrendingUp, TrendingDown, Minus, ChevronRight, Play, Activity, Check, Heart, RefreshCw } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus, ChevronRight, Play, AlertCircle, Check, Heart, RefreshCw } from 'lucide-react';
 import StateRing from '@/components/StateRing';
-import PillarRing from '@/components/PillarRing';
-import ContextCard from '@/components/ContextCard';
-import InsightCard from '@/components/InsightCard';
-import CognitiveWindowCard from '@/components/CognitiveWindowCard';
 import TransitionCard from '@/components/TransitionCard';
 import SachetConfirmation from '@/components/SachetConfirmation';
 import PerceptionModal from '@/components/PerceptionModal';
@@ -32,10 +28,91 @@ const phaseConfig: Record<string, { label: string; colorVar: string; color: stri
   CLEAR: { label: 'CLEAR', colorVar: '--vyr-accent-stable', color: '#4F6F64', desc: 'Recuperação cognitiva (18h30–23h59)', actionLabel: 'Clique ao tomar CLEAR' },
 };
 
+const pillarNames: Record<string, string> = {
+  energia: 'Energia',
+  clareza: 'Clareza',
+  estabilidade: 'Estabilidade',
+};
+
+/* ── Expanded Pillar Card with mini-gauge ── */
+
+function PillarCard({ name, value, description, index }: { name: string; value: number; description: string; index: number }) {
+  const circleRef = useRef<SVGCircleElement>(null);
+  const size = 48;
+  const stroke = 3.5;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const arcFraction = 0.75;
+  const arcLength = circumference * arcFraction;
+  const progress = (value / 5) * arcLength;
+  const dashOffset = arcLength - progress;
+
+  const isCritical = value < 2.0;
+  const arcColor = isCritical ? '#DC2626' : '#F59E0B';
+
+  useEffect(() => {
+    const circle = circleRef.current;
+    if (!circle) return;
+    circle.style.strokeDashoffset = `${arcLength}`;
+    const delay = 200 + index * 100;
+    setTimeout(() => {
+      circle.style.transition = 'stroke-dashoffset 800ms cubic-bezier(0.4, 0, 0.2, 1)';
+      circle.style.strokeDashoffset = `${dashOffset}`;
+    }, delay);
+  }, [value, arcLength, dashOffset, index]);
+
+  const borderColor = isCritical && name === 'Estabilidade' ? '#1F0A0A' : '#1A1A1A';
+
+  return (
+    <div
+      className="rounded-2xl p-4 flex items-center gap-4"
+      style={{
+        background: '#0E0E0E',
+        border: `1px solid ${borderColor}`,
+        animation: `slide-up 200ms ease-out ${200 + index * 100}ms both`,
+      }}
+    >
+      {/* Mini-gauge */}
+      <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ transform: 'rotate(-225deg)' }}>
+          <circle
+            cx={size / 2} cy={size / 2} r={radius}
+            fill="none" stroke="rgba(255,255,255,0.06)"
+            strokeWidth={stroke} strokeDasharray={`${arcLength} ${circumference}`} strokeLinecap="round"
+          />
+          <circle
+            ref={circleRef}
+            cx={size / 2} cy={size / 2} r={radius}
+            fill="none" stroke={arcColor}
+            strokeWidth={stroke} strokeDasharray={`${arcLength} ${circumference}`} strokeLinecap="round"
+            style={{ filter: `drop-shadow(0 0 4px ${arcColor}44)` }}
+          />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="text-sm font-light tabular-nums" style={{ color: arcColor }}>
+            {value.toFixed(1)}
+          </span>
+        </div>
+      </div>
+
+      {/* Name + description */}
+      <div className="flex-1 min-w-0">
+        <span className="text-sm font-medium text-[#E8E8E8]">{name}</span>
+        <p className="text-xs text-[#667788] mt-0.5 leading-relaxed">{description}</p>
+      </div>
+
+      {/* Value */}
+      <span className="text-sm font-light tabular-nums flex-shrink-0" style={{ color: arcColor }}>
+        {value.toFixed(1)}/5
+      </span>
+    </div>
+  );
+}
+
 const Home = () => {
   const navigate = useNavigate();
   const store = useVYRStore();
-  const { state, hasData, userName, actionsTaken, perceptionsDone, getPhasePerceptionValues, logPerception, wearableConnection, connectWearable, syncWearable } = store;
+  const { state, hasData, userName, actionsTaken, perceptionsDone, getPhasePerceptionValues, logPerception, wearableConnection, connectWearable } = store;
   const [showCheckpoint, setShowCheckpoint] = useState(false);
   const [perceptionModal, setPerceptionModal] = useState<{ show: boolean; phase: string }>({ show: false, phase: 'BOOT' });
   const [sachetPhase, setSachetPhase] = useState<string | null>(null);
@@ -45,7 +122,6 @@ const Home = () => {
   const isHCConnected = wearableConnection?.status === 'active' || wearableConnection?.status === 'connected';
 
   const interpretation = useMemo(() => interpret(state), [state]);
-  const phase = phaseConfig[state.phase];
 
   // Delta (today vs yesterday)
   const delta = useMemo(() => {
@@ -57,7 +133,7 @@ const Home = () => {
     return 0;
   }, [store.historyByDay]);
 
-  // Collect existing perception values for the day (to compute mean after 3rd phase)
+  // Collect existing perception values for the day
   const existingPhaseValues = useMemo(() => {
     return perceptionsDone
       .map((p) => {
@@ -71,9 +147,7 @@ const Home = () => {
     try {
       const currentPhase = getCurrentPhase();
       await store.logAction(currentPhase);
-      // Dismiss the store's sachet confirmation, we'll use our own flow
       store.dismissConfirmation();
-      // Open perception modal for this phase
       setPerceptionModal({ show: true, phase: currentPhase });
     } catch (err) {
       console.error('[home] Failed to log action:', err);
@@ -87,17 +161,21 @@ const Home = () => {
   const handlePerceptionClose = useCallback(() => {
     const closingPhase = perceptionModal.phase;
     setPerceptionModal({ show: false, phase: '' });
-    // Show sachet confirmation after perception modal closes
     setSachetPhase(closingPhase);
   }, [perceptionModal.phase]);
 
+  // Limiting factor info
+  const limitingPillarName = pillarNames[state.limitingFactor] || state.limitingFactor;
+  const limitingValue = state.pillars[state.limitingFactor as keyof typeof state.pillars];
+  const limitingLevel = limitingValue < 2.0 ? 'NÍVEL CRÍTICO' : limitingValue < 3.0 ? 'NÍVEL BAIXO' : 'NÍVEL MODERADO';
+
   return (
-    <div className="min-h-dvh bg-background pb-24 safe-area-top">
+    <div className="min-h-dvh bg-background pb-24 safe-area-top" style={{ fontFamily: 'Inter, sans-serif' }}>
       {/* 1. Header */}
       <header className="flex items-center justify-between px-5 py-4">
         <div className="flex items-center gap-2.5">
           <BrainLogo size={32} />
-          <span className="text-sm text-foreground font-medium">
+          <span className="text-sm text-foreground" style={{ fontWeight: 500 }}>
             {getGreeting()}{userName ? `, ${userName}` : ''}
           </span>
         </div>
@@ -115,8 +193,8 @@ const Home = () => {
               <Heart size={20} className="text-white" />
             </div>
             <div className="flex-1">
-              <h3 className="text-sm font-semibold text-foreground">Health Connect</h3>
-              <p className="text-xs text-muted-foreground">Conecte para sincronizar dados do wearable.</p>
+              <h3 className="text-sm text-foreground" style={{ fontWeight: 500 }}>Health Connect</h3>
+              <p className="text-xs text-muted-foreground" style={{ fontWeight: 400 }}>Conecte para sincronizar dados do wearable.</p>
             </div>
           </div>
           <button
@@ -126,7 +204,8 @@ const Home = () => {
               setConnectingHC(false);
             }}
             disabled={connectingHC}
-            className="w-full mt-3 rounded-xl bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-medium py-2.5 text-sm transition-all active:scale-[0.98] disabled:opacity-50"
+            className="w-full mt-3 rounded-xl bg-gradient-to-r from-blue-500 to-cyan-500 text-white py-2.5 text-sm transition-all active:scale-[0.98] disabled:opacity-50"
+            style={{ fontWeight: 500 }}
           >
             {connectingHC ? 'Conectando...' : 'Conectar e Sincronizar'}
           </button>
@@ -137,11 +216,11 @@ const Home = () => {
       {isHCConnected && syncingHC && (
         <div className="mx-5 mb-2 flex items-center justify-center gap-2 py-2 rounded-xl" style={{ background: 'hsl(var(--card))' }}>
           <RefreshCw size={14} className="animate-spin text-muted-foreground" />
-          <span className="text-xs text-muted-foreground">Sincronizando Health Connect...</span>
+          <span className="text-xs text-muted-foreground" style={{ fontWeight: 400 }}>Sincronizando Health Connect...</span>
         </div>
       )}
 
-      {/* 2. StateRing */}
+      {/* ── 1. VYR State Gauge ── */}
       <div className="flex flex-col items-center pt-2" style={{ animation: 'fade-in 150ms ease-out' }}>
         <div onClick={() => hasData && navigate('/state')} className={hasData ? 'cursor-pointer' : ''}>
           <StateRing
@@ -151,7 +230,7 @@ const Home = () => {
           />
         </div>
 
-        {/* 3. ScoreDelta */}
+        {/* ScoreDelta */}
         {hasData && (
           <div className="flex items-center gap-1 mt-3 animate-delta-pulse">
             {delta > 0 ? (
@@ -161,18 +240,9 @@ const Home = () => {
             ) : (
               <Minus size={14} className="text-vyr-text-muted" />
             )}
-            <span className={`text-xs font-medium ${delta > 0 ? 'text-vyr-positive' : delta < 0 ? 'text-vyr-caution' : 'text-vyr-text-muted'}`}>
+            <span className={`text-xs ${delta > 0 ? 'text-vyr-positive' : delta < 0 ? 'text-vyr-caution' : 'text-vyr-text-muted'}`} style={{ fontWeight: 500 }}>
               {delta > 0 ? '+' : ''}{delta} pts vs ontem
             </span>
-          </div>
-        )}
-
-        {/* 4. PillarRings */}
-        {hasData && (
-          <div className="flex items-center justify-center gap-8 mt-6">
-            <PillarRing value={state.pillars.energia} label="Energia" colorVar="--vyr-energia" index={0} />
-            <PillarRing value={state.pillars.clareza} label="Clareza" colorVar="--vyr-clareza" index={1} />
-            <PillarRing value={state.pillars.estabilidade} label="Estabilidade" colorVar="--vyr-estabilidade" index={2} />
           </div>
         )}
       </div>
@@ -180,80 +250,117 @@ const Home = () => {
       <div className="px-5 mt-6 space-y-4">
         {!hasData ? (
           <>
-            {['Energia', 'Clareza', 'Estabilidade'].map((label) => (
-              <div key={label} className="rounded-2xl bg-card border border-border p-4 flex items-center gap-4">
-                <span className="text-lg font-mono font-bold text-foreground w-8 text-center">0</span>
+            {/* Empty state pillar cards */}
+            {['Energia', 'Clareza', 'Estabilidade'].map((label, i) => (
+              <div
+                key={label}
+                className="rounded-2xl p-4 flex items-center gap-4"
+                style={{ background: '#0E0E0E', border: '1px solid #1A1A1A' }}
+              >
+                <span className="text-lg font-light text-foreground w-8 text-center">0</span>
                 <div className="flex-1">
-                  <span className="text-sm font-medium text-foreground">{label}</span>
-                  <p className="text-xs text-muted-foreground">Aguardando leitura.</p>
+                  <span className="text-sm text-foreground" style={{ fontWeight: 500 }}>{label}</span>
+                  <p className="text-xs text-[#667788]" style={{ fontWeight: 400 }}>Aguardando leitura.</p>
                 </div>
-                <span className="text-xs font-mono text-muted-foreground">0/5</span>
+                <span className="text-xs text-[#667788]" style={{ fontWeight: 300 }}>0/5</span>
               </div>
             ))}
-            <div className="rounded-2xl bg-card border border-border p-4">
+            <div className="rounded-2xl p-4" style={{ background: '#0D0D0D', border: '1px solid #1A1A1A' }}>
               <div className="flex items-start gap-3">
-                <Activity size={20} className="text-primary mt-0.5 flex-shrink-0" />
+                <AlertCircle size={20} className="text-[#F59E0B] mt-0.5 flex-shrink-0" />
                 <div>
-                  <h3 className="text-sm font-semibold text-foreground">Diagnóstico do sistema</h3>
-                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                  <h3 className="text-sm text-foreground" style={{ fontWeight: 500 }}>Diagnóstico do sistema</h3>
+                  <p className="text-xs text-[#667788] mt-1 leading-relaxed" style={{ fontWeight: 400 }}>
                     Conecte um wearable para que o VYR possa calcular seu estado cognitivo.
                   </p>
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground text-center mt-4">Sem dados disponíveis.</p>
+              <p className="text-xs text-[#667788] text-center mt-4" style={{ fontWeight: 400 }}>Sem dados disponíveis.</p>
             </div>
           </>
         ) : (
           <>
-            {/* 5. ContextCard */}
-            <ContextCard items={interpretation.contextItems} />
-
-            {/* 6. CognitiveWindowCard */}
-            <CognitiveWindowCard
-              score={state.score}
-              clareza={state.pillars.clareza}
-              estabilidade={state.pillars.estabilidade}
-            />
-
-            {/* 7. InsightCard - Leitura do sistema */}
-            <InsightCard
-              type={interpretation.systemReadingType}
-              title="Leitura do sistema"
-              description={interpretation.whyScore}
-              detail={interpretation.dayRisk}
-              muted={interpretation.limitingFactorText}
-            />
-
-            {/* 8. Hoje isso significa */}
+            {/* ── 2. Card "Hoje isso significa" ── */}
             <button
               onClick={() => navigate('/state')}
-              className="w-full rounded-2xl bg-card p-4 text-left transition-transform active:scale-[0.98]"
+              className="w-full rounded-2xl p-4 text-left transition-transform active:scale-[0.98]"
+              style={{ background: '#0C1220', border: '1px solid #1E293B' }}
             >
-              <div className="flex items-center justify-between mb-1">
-                <h3 className="text-xs uppercase tracking-[0.15em] text-vyr-text-muted font-medium">
-                  Hoje isso significa
-                </h3>
-                <ChevronRight size={16} className="text-vyr-text-muted" />
-              </div>
-              <p className="text-[10px] text-muted-foreground mb-2">O que o sistema projeta para o seu dia.</p>
-              <div className="space-y-2">
-                {interpretation.todayMeans.map((item, i) => (
-                  <div key={i} className="flex items-start gap-2">
-                    <div className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0" style={{ background: 'hsl(var(--vyr-accent-action))' }} />
-                    <span className="text-sm text-secondary-foreground">{item}</span>
-                  </div>
-                ))}
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3
+                    className="text-xs uppercase"
+                    style={{ fontWeight: 500, color: '#4B7BEC', letterSpacing: '0.16em' }}
+                  >
+                    Hoje isso significa
+                  </h3>
+                  <p className="text-xs mt-1" style={{ fontWeight: 400, color: '#445566' }}>
+                    O que o sistema projeta para o seu dia.
+                  </p>
+                </div>
+                <ChevronRight size={18} style={{ color: '#445566' }} />
               </div>
             </button>
 
-            {/* 9. TransitionCard */}
+            {/* ── 3. Índices (Energia / Clareza / Estabilidade) ── */}
+            <PillarCard
+              name="Energia"
+              value={state.pillars.energia}
+              description={interpretation.pillarDescriptions.energia}
+              index={0}
+            />
+            <PillarCard
+              name="Clareza"
+              value={state.pillars.clareza}
+              description={interpretation.pillarDescriptions.clareza}
+              index={1}
+            />
+            <PillarCard
+              name="Estabilidade"
+              value={state.pillars.estabilidade}
+              description={interpretation.pillarDescriptions.estabilidade}
+              index={2}
+            />
+
+            {/* ── 4. Leitura do sistema (unified) ── */}
+            <div className="rounded-2xl p-4" style={{ background: '#0D0D0D', border: '1px solid #1A1A1A' }}>
+              <div className="flex items-start gap-3">
+                <AlertCircle size={18} className="flex-shrink-0 mt-0.5" style={{ color: '#F59E0B' }} />
+                <div className="min-w-0">
+                  <h4
+                    className="text-xs uppercase"
+                    style={{ fontWeight: 500, color: '#F59E0B', letterSpacing: '0.14em' }}
+                  >
+                    Leitura do sistema
+                  </h4>
+                  <p className="text-xs mt-2 leading-relaxed" style={{ fontWeight: 400, color: '#99AABB' }}>
+                    {interpretation.whyScore}
+                  </p>
+                  <p className="text-xs mt-1.5 leading-relaxed" style={{ fontWeight: 400, color: '#778899' }}>
+                    {interpretation.dayRisk}
+                  </p>
+                </div>
+              </div>
+
+              {/* Footer — fator limitante */}
+              <div className="mt-3 pt-3" style={{ borderTop: '1px solid #171717' }}>
+                <p
+                  className="text-[10px] uppercase text-center"
+                  style={{ fontWeight: 500, color: '#556677', letterSpacing: '0.14em' }}
+                >
+                  FATOR LIMITANTE: {limitingPillarName.toUpperCase()} · {limitingLevel}
+                </p>
+              </div>
+            </div>
+
+            {/* TransitionCard */}
             <TransitionCard
               state={state}
               actionsTaken={actionsTaken}
               onStartTransition={store.activateTransition}
             />
 
-            {/* 10. Ação Principal — Protocol CTA */}
+            {/* Protocol CTA */}
             {(() => {
               const activeDose = getActiveDosePhase();
 
@@ -290,25 +397,24 @@ const Home = () => {
                 if (next) {
                   const nextWindow = getPhaseTimeWindow(next);
                   return (
-                    <div className="rounded-2xl bg-card border border-border p-4 text-center space-y-1">
+                    <div className="rounded-2xl p-4 text-center space-y-1" style={{ background: '#0E0E0E', border: '1px solid #1A1A1A' }}>
                       <div className="flex items-center justify-center gap-2">
                         <Check size={16} style={{ color: activeConfig.color }} />
                         <span className="text-sm font-medium text-foreground">{activeDose} registrado</span>
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        Próxima fase: <span className="font-medium text-foreground">{next}</span> a partir das {nextWindow.label.split('–')[0]}
+                      <p className="text-xs" style={{ fontWeight: 400, color: '#667788' }}>
+                        Próxima fase: <span className="text-foreground" style={{ fontWeight: 500 }}>{next}</span> a partir das {nextWindow.label.split('–')[0]}
                       </p>
                     </div>
                   );
                 }
-                // CLEAR done — all phases complete
                 return (
-                  <div className="rounded-2xl bg-card border border-border p-4 text-center space-y-1">
+                  <div className="rounded-2xl p-4 text-center space-y-1" style={{ background: '#0E0E0E', border: '1px solid #1A1A1A' }}>
                     <div className="flex items-center justify-center gap-2">
                       <Check size={16} style={{ color: activeConfig.color }} />
                       <span className="text-sm font-medium text-foreground">Protocolo do dia completo</span>
                     </div>
-                    <p className="text-xs text-muted-foreground">Todas as fases foram registradas.</p>
+                    <p className="text-xs" style={{ fontWeight: 400, color: '#667788' }}>Todas as fases foram registradas.</p>
                   </div>
                 );
               }
@@ -325,7 +431,7 @@ const Home = () => {
 
                   <button
                     onClick={handleConfirmSachet}
-                    className="w-full rounded-xl py-4 flex flex-col items-center gap-1 text-sm font-medium text-foreground transition-transform active:scale-[0.98]"
+                    className="w-full rounded-xl py-4 flex flex-col items-center gap-1 text-sm text-foreground transition-transform active:scale-[0.98]"
                     style={{
                       background: activeConfig.color,
                       boxShadow: `0 4px 20px -4px ${activeConfig.color}66`,
@@ -349,7 +455,7 @@ const Home = () => {
 
       <BottomNav />
 
-      {/* Perception Modal — opens after dose registration */}
+      {/* Perception Modal */}
       {perceptionModal.show && (
         <PerceptionModal
           phase={perceptionModal.phase}
@@ -359,7 +465,7 @@ const Home = () => {
         />
       )}
 
-      {/* SachetConfirmation — shows after perception modal closes */}
+      {/* SachetConfirmation */}
       {sachetPhase && (
         <SachetConfirmation
           phase={sachetPhase}

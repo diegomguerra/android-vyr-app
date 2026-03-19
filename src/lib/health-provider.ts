@@ -28,6 +28,8 @@ export interface SleepSample {
 
 export interface IHealthProvider {
   isAvailable(): Promise<boolean>;
+  /** Silently check if all permissions are granted (no UI). */
+  checkPermissions(): Promise<boolean>;
   requestPermissions(): Promise<boolean>;
 
   readSteps(startDate: string, endDate: string, limit?: number): Promise<BridgeSample[]>;

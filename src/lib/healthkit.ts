@@ -49,6 +49,22 @@ export async function isHealthKitAvailable(): Promise<boolean> {
   }
 }
 
+/**
+ * Silently check if all Health Connect permissions are granted.
+ * Never shows a dialog — safe for auto-reconnect and background syncs.
+ */
+export async function checkHealthKitPermissions(): Promise<boolean> {
+  try {
+    const provider = await getProvider();
+    const granted = await provider.checkPermissions();
+    console.info('[healthkit] permissions check (silent):', granted);
+    return granted;
+  } catch (e) {
+    console.error('[healthkit] silent permission check failed:', e);
+    return false;
+  }
+}
+
 export async function requestHealthKitPermissions(): Promise<boolean> {
   try {
     const provider = await getProvider();
@@ -344,13 +360,13 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   const available = await isHealthKitAvailable();
   if (!available) return false;
 
-  // Always ensure permissions before reading data
+  // Silently check permissions before reading — never show a dialog during sync
   const provider = await getProvider();
-  const permissionsOk = await provider.requestPermissions();
-  console.info('[healthkit] permissions check before sync:', permissionsOk);
+  const permissionsOk = await provider.checkPermissions();
+  console.info('[healthkit] permissions check before sync (silent):', permissionsOk);
 
   if (!permissionsOk) {
-    console.warn('[healthkit] sync aborted: permissions not granted');
+    console.warn('[healthkit] sync aborted: permissions not granted (user must reconnect via Integrations)');
     return false;
   }
 
@@ -449,7 +465,7 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
 
   // Calculate baseline BEFORE stress — needed for z-score computation
   const baseline = await calculateBaseline();
-  const calibrating = baseline.daysOfData < 3;
+  const calibrating = baseline.daysOfData < 7;
 
   // Stress level: z-score on ln(RMSSD) with contextual modifiers
   // Always calculate — uses population baseline fallback when personal baseline unavailable
@@ -558,6 +574,7 @@ function createNoopProvider(): IHealthProvider {
   const noop = async () => false;
   return {
     isAvailable: async () => false,
+    checkPermissions: async () => false,
     requestPermissions: async () => false,
     readSteps: async () => [],
     readHeartRate: async () => [],

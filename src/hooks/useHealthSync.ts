@@ -3,7 +3,7 @@ import { App } from '@capacitor/app';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   isHealthKitAvailable,
-  requestHealthKitPermissions,
+  checkHealthKitPermissions,
   enableHealthKitBackgroundSync,
   runIncrementalHealthSync,
 } from '@/lib/healthkit';
@@ -87,16 +87,18 @@ export function useHealthSync() {
         return;
       }
 
-      // Verify Health Connect is still available and permissions are granted
+      // Verify Health Connect is still available and permissions are granted (silently)
       const available = await isHealthKitAvailable();
       if (!available) {
         console.warn('[health-sync] Health Connect not available');
         return;
       }
 
-      const granted = await requestHealthKitPermissions();
+      // Silent check — never show permission dialog on auto-reconnect.
+      // If permissions were revoked, user must reconnect via Integrations page.
+      const granted = await checkHealthKitPermissions();
       if (!granted) {
-        console.warn('[health-sync] permissions not granted, marking disconnected');
+        console.warn('[health-sync] permissions not granted (silent check), marking disconnected');
         await supabase
           .from('user_integrations')
           .update({ status: 'disconnected' })

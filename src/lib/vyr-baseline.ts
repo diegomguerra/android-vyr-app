@@ -83,8 +83,8 @@ export async function calculateBaseline(): Promise<BaselineMetrics> {
 
   const metrics = (rows || []).map((r) => r.metrics as unknown as MetricsData);
 
-  // If less than 3 days, use population fallback
-  if (metrics.length < 3) {
+  // If less than 7 days, use population fallback (matches UI baseline progress bar)
+  if (metrics.length < 7) {
     return await getPopulationBaseline(metrics.length);
   }
 
