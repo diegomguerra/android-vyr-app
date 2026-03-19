@@ -297,6 +297,94 @@ function computeStressLevel(
   return Math.max(0, Math.min(100, stress));
 }
 
+/**
+ * Downsample HR samples to max 1 per minute.
+ * Groups by minute-floor of startDate, keeps the first sample in each bucket.
+ */
+function downsampleToOnePerMinute(samples: { value: number; startDate: string; [key: string]: unknown }[]): typeof samples {
+  const buckets = new Map<number, typeof samples[0]>();
+  for (const s of samples) {
+    const ts = new Date(s.startDate).getTime();
+    const minuteKey = Math.floor(ts / 60000);
+    if (!buckets.has(minuteKey)) {
+      buckets.set(minuteKey, s);
+    }
+  }
+  return Array.from(buckets.values());
+}
+
+/**
+ * Build rows for biomarker_samples table from raw provider data.
+ * Each row represents one individual reading with its original timestamp.
+ */
+function buildSampleRows(
+  userId: string,
+  sourceProvider: string,
+  hrSamples: { value: number; startDate: string; source?: string }[],
+  rhrSamples: { value: number; startDate: string; source?: string }[],
+  hrvSamples: { value: number; startDate: string; source?: string }[],
+  spo2Samples: { value: number; startDate: string; source?: string }[],
+  rrSamples: { value: number; startDate: string; source?: string }[],
+  stepsSamples: { value: number; startDate: string; endDate: string; source?: string }[],
+  sleepSamples: SleepSample[],
+): Array<{
+  user_id: string;
+  type: string;
+  ts: string;
+  end_ts: string | null;
+  value: number | null;
+  payload_json: Record<string, unknown> | null;
+  source: string;
+}> {
+  const rows: ReturnType<typeof buildSampleRows> = [];
+  const src = (s: { source?: string }) => s.source || sourceProvider;
+
+  // HR — downsampled to 1/min
+  for (const s of downsampleToOnePerMinute(hrSamples)) {
+    rows.push({ user_id: userId, type: 'hr', ts: s.startDate, end_ts: null, value: s.value, payload_json: null, source: src(s) });
+  }
+
+  // RHR
+  for (const s of rhrSamples) {
+    rows.push({ user_id: userId, type: 'rhr', ts: s.startDate, end_ts: null, value: s.value, payload_json: null, source: src(s) });
+  }
+
+  // HRV
+  for (const s of hrvSamples) {
+    rows.push({ user_id: userId, type: 'hrv', ts: s.startDate, end_ts: null, value: s.value, payload_json: null, source: src(s) });
+  }
+
+  // SpO2
+  for (const s of spo2Samples) {
+    rows.push({ user_id: userId, type: 'spo2', ts: s.startDate, end_ts: null, value: s.value, payload_json: null, source: src(s) });
+  }
+
+  // Respiratory Rate
+  for (const s of rrSamples) {
+    rows.push({ user_id: userId, type: 'rr', ts: s.startDate, end_ts: null, value: s.value, payload_json: null, source: src(s) });
+  }
+
+  // Steps (have start + end)
+  for (const s of stepsSamples) {
+    rows.push({ user_id: userId, type: 'steps', ts: s.startDate, end_ts: s.endDate, value: s.value, payload_json: null, source: src(s) });
+  }
+
+  // Sleep (each stage with metadata)
+  for (const s of sleepSamples) {
+    rows.push({
+      user_id: userId,
+      type: 'sleep',
+      ts: s.startDate,
+      end_ts: s.endDate,
+      value: null,
+      payload_json: s.sleepState ? { sleepState: s.sleepState } : null,
+      source: (s as any).source || sourceProvider,
+    });
+  }
+
+  return rows;
+}
+
 let observerListenerBound = false;
 
 export async function enableHealthKitBackgroundSync(): Promise<void> {
@@ -413,6 +501,31 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   const sources = [...new Set(allSamples.map(s => s.source).filter(Boolean))];
   console.info('[healthkit] data sources found:', sources);
 
+  // ── Persist raw biomarker samples (never overwritten, deduped by constraint) ──
+  const sourceProvider = provider.getSourceProvider();
+  const rawRows = buildSampleRows(
+    userId, sourceProvider,
+    hrSamples as any[], rhrSamples, hrvSamples, spo2Samples, rrSamples,
+    stepsSamples as any[], sleepSamples,
+  );
+  if (rawRows.length > 0) {
+    try {
+      const { error: rawErr } = await supabase
+        .from('biomarker_samples')
+        .insert(rawRows as any)
+        .select('id');  // minimal return
+      if (rawErr) {
+        // 23505 = unique_violation (duplicates), expected and safe to ignore
+        if ((rawErr as any).code !== '23505') {
+          console.warn('[healthkit] biomarker_samples insert error:', rawErr.message);
+        }
+      }
+      console.info('[healthkit] raw samples persisted:', rawRows.length, 'rows (deduped silently)');
+    } catch (e) {
+      console.warn('[healthkit] biomarker_samples insert failed:', e);
+    }
+  }
+
   // Use all samples from Health Connect — no source filtering
   const fSleep = sleepSamples;
   const fSteps = stepsSamples;
@@ -488,8 +601,6 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     respiratory_rate: avgRR ? Math.round(avgRR * 10) / 10 : null,
     calibrating,
   };
-
-  const sourceProvider = provider.getSourceProvider();
 
   // 1. Upsert ring_daily_data
   const result = await retryOnAuthErrorLabeled(async () => {
