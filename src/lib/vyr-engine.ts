@@ -237,27 +237,39 @@ export function getCurrentPhase(): 'BOOT' | 'HOLD' | 'CLEAR' {
   return 'CLEAR';
 }
 
-/** Check if current time is within any active protocol window (5h-22h) */
+/** Check if current time is within any active dose window */
 export function isWithinProtocolWindow(): boolean {
-  const hour = new Date().getHours();
-  return hour >= 5 && hour < 22;
+  return getActiveDosePhase() !== null;
 }
 
 /** Get the time window description for a phase */
-export function getPhaseTimeWindow(phase: string): { start: number; end: number; label: string } {
+export function getPhaseTimeWindow(phase: string): { start: string; end: string; label: string } {
   switch (phase) {
-    case 'BOOT': return { start: 5, end: 12, label: '05h–11h59' };
-    case 'HOLD': return { start: 12, end: 18, label: '12h–17h59' };
-    case 'CLEAR': return { start: 18, end: 22, label: '18h–22h' };
-    default: return { start: 5, end: 22, label: '05h–22h' };
+    case 'BOOT': return { start: '05:00', end: '11:00', label: '05h–11h' };
+    case 'HOLD': return { start: '12:00', end: '17:30', label: '12h–17h30' };
+    case 'CLEAR': return { start: '18:30', end: '23:59', label: '18h30–23h59' };
+    default: return { start: '05:00', end: '23:59', label: '05h–23h59' };
   }
+}
+
+/**
+ * Returns the dose phase active right now, or null if between windows.
+ * BOOT  05:00–11:00
+ * HOLD  12:00–17:30
+ * CLEAR 18:30–23:59
+ */
+export function getActiveDosePhase(): 'BOOT' | 'HOLD' | 'CLEAR' | null {
+  const now = new Date();
+  const mins = now.getHours() * 60 + now.getMinutes();
+  if (mins >= 300 && mins < 660) return 'BOOT';   // 05:00–10:59
+  if (mins >= 720 && mins < 1050) return 'HOLD';   // 12:00–17:29
+  if (mins >= 1110 && mins < 1440) return 'CLEAR'; // 18:30–23:59
+  return null;
 }
 
 /** Check if a specific phase is currently in its time window */
 export function isPhaseActive(phase: string): boolean {
-  const hour = new Date().getHours();
-  const window = getPhaseTimeWindow(phase);
-  return hour >= window.start && hour < window.end;
+  return getActiveDosePhase() === phase;
 }
 
 /**

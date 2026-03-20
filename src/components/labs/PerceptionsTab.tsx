@@ -9,9 +9,9 @@ import { isPhaseActive, getPhaseTimeWindow } from '@/lib/vyr-engine';
 import { getLocalToday } from '@/lib/date-utils';
 
 const phases = [
-  { key: 'BOOT', label: 'Boot', sub: '05h–11h59', icon: Zap },
-  { key: 'HOLD', label: 'Hold', sub: '12h–17h59', icon: Eye },
-  { key: 'CLEAR', label: 'Clear', sub: '18h–22h', icon: Moon },
+  { key: 'BOOT', label: 'Boot', sub: '05h–11h', icon: Zap },
+  { key: 'HOLD', label: 'Hold', sub: '12h–17h30', icon: Eye },
+  { key: 'CLEAR', label: 'Clear', sub: '18h30–23h59', icon: Moon },
 ] as const;
 
 const sliders = [

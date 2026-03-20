@@ -17,7 +17,7 @@ import BrainLogo from '@/components/BrainLogo';
 import { interpret } from '@/lib/vyr-interpreter';
 import { useVYRStore } from '@/hooks/useVYRStore';
 import { getLocalToday } from '@/lib/date-utils';
-import { isWithinProtocolWindow, isPhaseActive, getPhaseTimeWindow, getCurrentPhase } from '@/lib/vyr-engine';
+import { isPhaseActive, getPhaseTimeWindow, getCurrentPhase, getActiveDosePhase } from '@/lib/vyr-engine';
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -27,9 +27,9 @@ function getGreeting(): string {
 }
 
 const phaseConfig: Record<string, { label: string; colorVar: string; color: string; desc: string; actionLabel: string }> = {
-  BOOT: { label: 'BOOT', colorVar: '--vyr-accent-action', color: '#556B8A', desc: 'Ativação cognitiva (05h–11h59)', actionLabel: 'Clique ao tomar BOOT' },
-  HOLD: { label: 'HOLD', colorVar: '--vyr-accent-transition', color: '#8F7A4A', desc: 'Sustentação cognitiva (12h–17h59)', actionLabel: 'Clique ao tomar HOLD' },
-  CLEAR: { label: 'CLEAR', colorVar: '--vyr-accent-stable', color: '#4F6F64', desc: 'Recuperação cognitiva (18h–22h)', actionLabel: 'Clique ao tomar CLEAR' },
+  BOOT: { label: 'BOOT', colorVar: '--vyr-accent-action', color: '#556B8A', desc: 'Ativação cognitiva (05h–11h)', actionLabel: 'Clique ao tomar BOOT' },
+  HOLD: { label: 'HOLD', colorVar: '--vyr-accent-transition', color: '#8F7A4A', desc: 'Sustentação cognitiva (12h–17h30)', actionLabel: 'Clique ao tomar HOLD' },
+  CLEAR: { label: 'CLEAR', colorVar: '--vyr-accent-stable', color: '#4F6F64', desc: 'Recuperação cognitiva (18h30–23h59)', actionLabel: 'Clique ao tomar CLEAR' },
 };
 
 const Home = () => {
@@ -255,33 +255,45 @@ const Home = () => {
 
             {/* 10. Ação Principal — Protocol CTA */}
             {(() => {
-              const currentPhase = getCurrentPhase();
-              const currentConfig = phaseConfig[currentPhase];
-              const doseRegistered = actionsTaken.includes(currentPhase);
-              const perceptionRegistered = perceptionsDone.includes(currentPhase);
-              const phaseComplete = doseRegistered && perceptionRegistered;
-              const inWindow = isWithinProtocolWindow();
+              const activeDose = getActiveDosePhase();
 
-              if (!inWindow) {
-                // Outside 5-22h — no protocol
+              if (!activeDose) {
+                // Between dose windows — find next upcoming phase
+                const now = new Date();
+                const mins = now.getHours() * 60 + now.getMinutes();
+                let nextPhase: string;
+                let nextLabel: string;
+                if (mins < 300) { nextPhase = 'BOOT'; nextLabel = '05h'; }
+                else if (mins >= 660 && mins < 720) { nextPhase = 'HOLD'; nextLabel = '12h'; }
+                else if (mins >= 1050 && mins < 1110) { nextPhase = 'CLEAR'; nextLabel = '18h30'; }
+                else { nextPhase = 'BOOT'; nextLabel = '05h (amanhã)'; }
+
                 return (
-                  <div className="rounded-2xl bg-card border border-border p-4 text-center">
-                    <p className="text-xs text-muted-foreground">Protocolo disponível entre 05h e 22h.</p>
+                  <div className="rounded-2xl bg-card border border-border p-4 text-center space-y-1">
+                    <p className="text-xs text-muted-foreground">Nenhuma dose ativa no momento.</p>
+                    <p className="text-xs text-muted-foreground">
+                      Próxima fase: <span className="font-medium text-foreground">{nextPhase}</span> às {nextLabel}
+                    </p>
                   </div>
                 );
               }
 
+              const activeConfig = phaseConfig[activeDose];
+              const doseRegistered = actionsTaken.includes(activeDose);
+              const perceptionRegistered = perceptionsDone.includes(activeDose);
+              const phaseComplete = doseRegistered && perceptionRegistered;
+
               if (phaseComplete) {
-                // Current phase done — show next phase info
+                // Current dose done — show next phase info
                 const nextPhases = { BOOT: 'HOLD', HOLD: 'CLEAR', CLEAR: null } as const;
-                const next = nextPhases[currentPhase as keyof typeof nextPhases];
+                const next = nextPhases[activeDose];
                 if (next) {
                   const nextWindow = getPhaseTimeWindow(next);
                   return (
                     <div className="rounded-2xl bg-card border border-border p-4 text-center space-y-1">
                       <div className="flex items-center justify-center gap-2">
-                        <Check size={16} style={{ color: currentConfig.color }} />
-                        <span className="text-sm font-medium text-foreground">{currentPhase} registrado</span>
+                        <Check size={16} style={{ color: activeConfig.color }} />
+                        <span className="text-sm font-medium text-foreground">{activeDose} registrado</span>
                       </div>
                       <p className="text-xs text-muted-foreground">
                         Próxima fase: <span className="font-medium text-foreground">{next}</span> a partir das {nextWindow.label.split('–')[0]}
@@ -293,7 +305,7 @@ const Home = () => {
                 return (
                   <div className="rounded-2xl bg-card border border-border p-4 text-center space-y-1">
                     <div className="flex items-center justify-center gap-2">
-                      <Check size={16} style={{ color: currentConfig.color }} />
+                      <Check size={16} style={{ color: activeConfig.color }} />
                       <span className="text-sm font-medium text-foreground">Protocolo do dia completo</span>
                     </div>
                     <p className="text-xs text-muted-foreground">Todas as fases foram registradas.</p>
@@ -301,32 +313,32 @@ const Home = () => {
                 );
               }
 
-              // Show CTA for current phase
+              // Show CTA for active dose phase
               return (
                 <>
                   <div className="rounded-2xl bg-card border border-border p-4">
                     <h3 className="text-xs uppercase tracking-[0.15em] text-muted-foreground font-medium mb-1">
-                      Protocolo {currentConfig.label}
+                      Protocolo {activeConfig.label}
                     </h3>
-                    <p className="text-xs text-muted-foreground mb-3">{currentConfig.desc}. Registre quando tomar o sachet desta fase.</p>
+                    <p className="text-xs text-muted-foreground mb-3">{activeConfig.desc}. Registre quando tomar o sachet desta fase.</p>
                   </div>
 
                   <button
                     onClick={handleConfirmSachet}
                     className="w-full rounded-xl py-4 flex flex-col items-center gap-1 text-sm font-medium text-foreground transition-transform active:scale-[0.98]"
                     style={{
-                      background: currentConfig.color,
-                      boxShadow: `0 4px 20px -4px ${currentConfig.color}66`,
+                      background: activeConfig.color,
+                      boxShadow: `0 4px 20px -4px ${activeConfig.color}66`,
                     }}
                   >
                     <div className="flex items-center gap-2">
                       <Play size={16} fill="currentColor" />
-                      <span>Protocolo {currentConfig.label}</span>
+                      <span>Protocolo {activeConfig.label}</span>
                     </div>
-                    <span className="text-[10px] opacity-70">{currentConfig.actionLabel}</span>
+                    <span className="text-[10px] opacity-70">{activeConfig.actionLabel}</span>
                   </button>
                   <p className="text-[10px] text-muted-foreground text-center -mt-2">
-                    Registre aqui quando tomar o sachet da fase {currentConfig.label}.
+                    Registre aqui quando tomar o sachet da fase {activeConfig.label}.
                   </p>
                 </>
               );
