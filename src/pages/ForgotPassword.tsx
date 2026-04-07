@@ -91,7 +91,7 @@ const ForgotPassword = () => {
                   Por segurança, aguarde {rateLimitSeconds}s antes de tentar novamente.
                 </p>
               )}
-              <button type="submit" disabled={loading} className="w-full rounded-xl bg-primary text-primary-foreground font-medium py-3.5 text-sm transition-all active:scale-[0.98] hover:opacity-90 disabled:opacity-50">
+              <button type="submit" disabled={loading || !email.trim()} className="w-full rounded-xl bg-primary text-primary-foreground font-medium py-3.5 text-sm transition-all active:scale-[0.98] hover:opacity-90 disabled:opacity-50">
                 {loading ? 'Enviando...' : 'Enviar link de recuperação'}
               </button>
             </form>

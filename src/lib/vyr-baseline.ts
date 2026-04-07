@@ -109,6 +109,10 @@ export async function calculateBaseline(): Promise<BaselineMetrics> {
   };
 
   console.info('[baseline] computed from', metrics.length, 'days:', result);
+
+  // Persist baseline to user_baselines table
+  await persistBaseline(userId, result, thirtyDaysAgo, new Date());
+
   return result;
 }
 
@@ -150,4 +154,52 @@ async function getPopulationBaseline(daysOfData = 0): Promise<BaselineMetrics> {
     spo2: find('spo2') || { mean: 97, std: 1.5 },
     daysOfData,
   };
+}
+
+/**
+ * Persist computed baseline metrics to user_baselines table.
+ * Uses upsert on (user_id, metric) to keep one row per metric per user.
+ */
+async function persistBaseline(
+  userId: string,
+  baseline: BaselineMetrics,
+  windowStart: Date,
+  windowEnd: Date,
+): Promise<void> {
+  const metricKeys = ['rhr', 'hrv', 'hrvLn', 'sleepDuration', 'sleepQuality', 'spo2'] as const;
+  const rows = metricKeys
+    .filter((k) => baseline[k] != null)
+    .map((k) => ({
+      user_id: userId,
+      metric: k,
+      mean: baseline[k]!.mean,
+      stddev: baseline[k]!.std,
+      sample_count: baseline.daysOfData,
+      window_start: windowStart.toISOString().split('T')[0],
+      window_end: windowEnd.toISOString().split('T')[0],
+      updated_at: new Date().toISOString(),
+    }));
+
+  if (rows.length === 0) return;
+
+  // Delete old baselines then insert fresh — simple and avoids unique-constraint issues
+  const { error: delErr } = await supabase
+    .from('user_baselines')
+    .delete()
+    .eq('user_id', userId);
+
+  if (delErr) {
+    console.error('[baseline] delete failed:', delErr.message);
+    return;
+  }
+
+  const { error: insErr } = await supabase
+    .from('user_baselines')
+    .insert(rows as any);
+
+  if (insErr) {
+    console.error('[baseline] insert failed:', insErr.message);
+  } else {
+    console.info('[baseline] persisted', rows.length, 'metrics to user_baselines');
+  }
 }
