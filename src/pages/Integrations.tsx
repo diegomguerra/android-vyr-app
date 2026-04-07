@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Heart, Activity, Info, Check, RefreshCw, Unplug } from 'lucide-react';
+import { Heart, Activity, Info, Check, RefreshCw, Unplug, RotateCcw } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { useNavigate } from 'react-router-dom';
 import BottomNav from '@/components/BottomNav';
 import { useVYRStore } from '@/hooks/useVYRStore';
 import { toast } from 'sonner';
+import { runRecoverySync } from '@/lib/healthkit';
 import WearableModule from '@/wearables/jstyle/WearableModule';
 import BiomarkerDataCard from '@/components/BiomarkerDataCard';
 import DebugConsole from '@/components/DebugConsole';
@@ -22,6 +23,7 @@ const IntegrationsPage = () => {
   const { wearableConnection, connectWearable, disconnectWearable, syncWearable } = useVYRStore();
   const [syncing, setSyncing] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [recovering, setRecovering] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const isConnected = wearableConnection?.status === 'active' || wearableConnection?.status === 'connected';
@@ -123,7 +125,7 @@ const IntegrationsPage = () => {
               <div className="flex gap-2">
                 <button
                   onClick={handleSync}
-                  disabled={syncing}
+                  disabled={syncing || recovering}
                   className="flex-1 rounded-xl border border-border py-2.5 text-xs font-medium text-foreground flex items-center justify-center gap-1.5 active:scale-[0.98] disabled:opacity-50"
                 >
                   <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
@@ -131,12 +133,33 @@ const IntegrationsPage = () => {
                 </button>
                 <button
                   onClick={handleDisconnect}
-                  className="rounded-xl border border-border py-2.5 px-4 text-xs text-destructive flex items-center gap-1.5 active:scale-[0.98]"
+                  disabled={recovering}
+                  className="rounded-xl border border-border py-2.5 px-4 text-xs text-destructive flex items-center gap-1.5 active:scale-[0.98] disabled:opacity-50"
                 >
                   <Unplug size={14} />
                   Desconectar
                 </button>
               </div>
+              {/* Recovery sync button */}
+              <button
+                onClick={async () => {
+                  setRecovering(true);
+                  toast.info('Recuperando historico (30 dias)...');
+                  const result = await runRecoverySync(30);
+                  setRecovering(false);
+                  setRefreshKey((k) => k + 1);
+                  if (result.samples > 0) {
+                    toast.success(`Recuperados ${result.samples.toLocaleString()} amostras de ${result.days} dias`);
+                  } else {
+                    toast.info('Nenhum dado historico encontrado no Health Connect');
+                  }
+                }}
+                disabled={recovering || syncing}
+                className="w-full rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-950/20 py-2.5 text-xs font-medium text-amber-700 dark:text-amber-400 flex items-center justify-center gap-1.5 active:scale-[0.98] disabled:opacity-50 mt-2"
+              >
+                <RotateCcw size={14} className={recovering ? 'animate-spin' : ''} />
+                {recovering ? 'Recuperando historico...' : 'Recuperar Dados (30 dias)'}
+              </button>
             </>
           ) : (
             <button

@@ -146,8 +146,14 @@ export function computePillars(data: BiometricData, baseline?: BaselineValues): 
   }
 
   // Subjective energy perception (0-10 → z-score against mean=5, std=2)
+  // Weight 0.9 base — boosted to 1.3 when subjective diverges strongly from biometric signal
   if (validated.subjectiveEnergy != null) {
-    energiaInputs.push({ value: zToPillar(zScore(validated.subjectiveEnergy, 5, 2)), weight: 0.6 });
+    const subZ = zToPillar(zScore(validated.subjectiveEnergy, 5, 2));
+    const bioAvg = energiaInputs.length > 0
+      ? energiaInputs.reduce((s, i) => s + i.value, 0) / energiaInputs.length : 0;
+    const divergence = Math.abs(subZ - bioAvg);
+    const subWeight = divergence > 2.0 ? 1.3 : 0.9;
+    energiaInputs.push({ value: subZ, weight: subWeight });
   }
 
   let energia = dynamicWeightedAvg(energiaInputs, 2.5, 2.5);
@@ -171,11 +177,22 @@ export function computePillars(data: BiometricData, baseline?: BaselineValues): 
     clarezaInputs.push({ value: zToPillar(-awkZ), weight: 0.5 });
   }
   // Subjective clarity + focus perceptions (0-10 → z-score against mean=5, std=2)
+  // Weight 0.8 base — boosted to 1.2 when subjective diverges strongly from biometric signal
   if (validated.subjectiveClarity != null) {
-    clarezaInputs.push({ value: zToPillar(zScore(validated.subjectiveClarity, 5, 2)), weight: 0.5 });
+    const subZ = zToPillar(zScore(validated.subjectiveClarity, 5, 2));
+    const bioAvg = clarezaInputs.length > 0
+      ? clarezaInputs.reduce((s, i) => s + i.value, 0) / clarezaInputs.length : 0;
+    const divergence = Math.abs(subZ - bioAvg);
+    const subWeight = divergence > 2.0 ? 1.2 : 0.8;
+    clarezaInputs.push({ value: subZ, weight: subWeight });
   }
   if (validated.subjectiveFocus != null) {
-    clarezaInputs.push({ value: zToPillar(zScore(validated.subjectiveFocus, 5, 2)), weight: 0.5 });
+    const subZ = zToPillar(zScore(validated.subjectiveFocus, 5, 2));
+    const bioAvg = clarezaInputs.length > 0
+      ? clarezaInputs.reduce((s, i) => s + i.value, 0) / clarezaInputs.length : 0;
+    const divergence = Math.abs(subZ - bioAvg);
+    const subWeight = divergence > 2.0 ? 1.2 : 0.8;
+    clarezaInputs.push({ value: subZ, weight: subWeight });
   }
 
   const clareza = dynamicWeightedAvg(clarezaInputs, 2.5, 2.5);
@@ -196,8 +213,14 @@ export function computePillars(data: BiometricData, baseline?: BaselineValues): 
     estabInputs.push({ value: zToPillar(-tempZ), weight: 0.3 });
   }
   // Subjective stability perception (0-10 → z-score against mean=5, std=2)
+  // Weight 0.8 base — boosted to 1.2 when subjective diverges strongly from biometric signal
   if (validated.subjectiveStability != null) {
-    estabInputs.push({ value: zToPillar(zScore(validated.subjectiveStability, 5, 2)), weight: 0.5 });
+    const subZ = zToPillar(zScore(validated.subjectiveStability, 5, 2));
+    const bioAvg = estabInputs.length > 0
+      ? estabInputs.reduce((s, i) => s + i.value, 0) / estabInputs.length : 0;
+    const divergence = Math.abs(subZ - bioAvg);
+    const subWeight = divergence > 2.0 ? 1.2 : 0.8;
+    estabInputs.push({ value: subZ, weight: subWeight });
   }
 
   const estabilidade = dynamicWeightedAvg(estabInputs, 2.0, 2.5);

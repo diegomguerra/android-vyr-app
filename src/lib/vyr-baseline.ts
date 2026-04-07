@@ -158,7 +158,8 @@ async function getPopulationBaseline(daysOfData = 0): Promise<BaselineMetrics> {
 
 /**
  * Persist computed baseline metrics to user_baselines table.
- * Uses upsert on (user_id, metric) to keep one row per metric per user.
+ * Uses upsert to atomically insert-or-update each metric row,
+ * preventing a window where the user has no baseline (unlike delete+insert).
  */
 async function persistBaseline(
   userId: string,
@@ -182,24 +183,24 @@ async function persistBaseline(
 
   if (rows.length === 0) return;
 
-  // Delete old baselines then insert fresh — simple and avoids unique-constraint issues
-  const { error: delErr } = await supabase
+  // Upsert each metric — atomic per row, user never loses baseline
+  const { error: upsErr } = await supabase
     .from('user_baselines')
-    .delete()
-    .eq('user_id', userId);
+    .upsert(rows as any, { onConflict: 'user_id,metric' });
 
-  if (delErr) {
-    console.error('[baseline] delete failed:', delErr.message);
-    return;
-  }
-
-  const { error: insErr } = await supabase
-    .from('user_baselines')
-    .insert(rows as any);
-
-  if (insErr) {
-    console.error('[baseline] insert failed:', insErr.message);
+  if (upsErr) {
+    console.error('[baseline] upsert failed:', upsErr.message);
   } else {
+    // Clean up stale metrics no longer in the baseline
+    const activeMetrics = rows.map((r) => r.metric);
+    const { error: cleanErr } = await supabase
+      .from('user_baselines')
+      .delete()
+      .eq('user_id', userId)
+      .not('metric', 'in', `(${activeMetrics.join(',')})`);
+    if (cleanErr) {
+      console.warn('[baseline] cleanup of stale metrics failed:', cleanErr.message);
+    }
     console.info('[baseline] persisted', rows.length, 'metrics to user_baselines');
   }
 }

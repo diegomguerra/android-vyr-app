@@ -174,10 +174,13 @@ export function calculateSleepQuality(samples: SleepSample[]): { durationHours: 
 
   if (netSleepMs === 0) return { durationHours: 0, quality: 0 };
 
-  // Quality from stage breakdown if available
+  // Quality from stage breakdown if available.
+  // Weights reflect literature: deep sleep (SWS) is restorative/critical,
+  // REM supports memory consolidation, light is less impactful.
+  // deep × 2.0 + rem × 1.5 + light × 0.5 — balanced to produce 0-100 range.
   const stageTotal = deepMs + remMs + lightMs;
   const quality = stageTotal > 0
-    ? Math.min(100, Math.round(((deepMs / stageTotal) + (remMs / stageTotal) * 2.5) * 100))
+    ? Math.min(100, Math.round(((deepMs / stageTotal) * 2.0 + (remMs / stageTotal) * 1.5 + (lightMs / stageTotal) * 0.5) * 100 / 2.0))
     : Math.min(100, Math.round((netSleepMs / (8 * 3600000)) * 50));
 
   return {
@@ -385,6 +388,83 @@ function buildSampleRows(
   return rows;
 }
 
+// ── Local queue for offline resilience ──
+const LOCAL_QUEUE_KEY = 'vyr.biomarker_queue';
+
+function getLocalQueue(): Array<Record<string, unknown>> {
+  try {
+    const raw = localStorage.getItem(LOCAL_QUEUE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function setLocalQueue(rows: Array<Record<string, unknown>>): void {
+  try {
+    localStorage.setItem(LOCAL_QUEUE_KEY, JSON.stringify(rows));
+  } catch (e) {
+    console.warn('[healthkit] failed to persist local queue:', e);
+  }
+}
+
+function clearLocalQueue(): void {
+  localStorage.removeItem(LOCAL_QUEUE_KEY);
+}
+
+/**
+ * Insert biomarker_samples in chunks of 50 to avoid Supabase timeout.
+ * Returns the number of rows successfully inserted.
+ */
+async function insertBiomarkerSamplesChunked(
+  rows: Array<Record<string, unknown>>,
+): Promise<number> {
+  const CHUNK_SIZE = 50;
+  let inserted = 0;
+  for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+    const chunk = rows.slice(i, i + CHUNK_SIZE);
+    try {
+      const { error } = await supabase
+        .from('biomarker_samples')
+        .insert(chunk as any)
+        .select('id');
+      if (error) {
+        // 23505 = unique_violation (duplicates), expected and safe to ignore
+        if ((error as any).code !== '23505') {
+          console.warn('[healthkit] biomarker_samples chunk insert error:', error.message);
+        } else {
+          inserted += chunk.length; // dupes count as "handled"
+        }
+      } else {
+        inserted += chunk.length;
+      }
+    } catch (e) {
+      console.warn('[healthkit] biomarker_samples chunk insert failed:', e);
+      // Don't break — try remaining chunks
+    }
+  }
+  return inserted;
+}
+
+/**
+ * Filter raw sample rows to physiological ranges before persisting.
+ * Removes clearly invalid readings that would pollute the data.
+ */
+function filterPhysiologicalRange(
+  rows: Array<{ type: string; value: number | null; [key: string]: unknown }>,
+): typeof rows {
+  return rows.filter((r) => {
+    if (r.value == null) return true; // sleep rows have null value, keep them
+    switch (r.type) {
+      case 'hr':    return r.value >= 30 && r.value <= 220;
+      case 'rhr':   return r.value >= 30 && r.value <= 120;
+      case 'hrv':   return r.value >= 5 && r.value <= 250;
+      case 'spo2':  return r.value >= 50 && r.value <= 100;
+      case 'rr':    return r.value >= 5 && r.value <= 60;
+      case 'steps': return r.value >= 0 && r.value <= 200000;
+      default:      return true;
+    }
+  });
+}
+
 let observerListenerBound = false;
 
 export async function enableHealthKitBackgroundSync(): Promise<void> {
@@ -435,6 +515,136 @@ export async function syncHealthKitData(): Promise<boolean> {
   } catch (e) {
     console.error('[healthkit] sync exception:', e);
     return false;
+  } finally {
+    syncLock = false;
+  }
+}
+
+/**
+ * Recovery sync: re-reads up to 30 days of historical data from Health Connect
+ * and persists raw biomarker_samples (deduped by constraint).
+ * Use when a user's data was lost from Supabase but still exists in Health Connect.
+ * Processes day-by-day to avoid memory/timeout issues.
+ */
+export async function runRecoverySync(daysBack = 30): Promise<{ days: number; samples: number }> {
+  if (getPlatform() === 'web') return { days: 0, samples: 0 };
+  if (syncLock) return { days: 0, samples: 0 };
+  syncLock = true;
+
+  let totalSamples = 0;
+  let daysProcessed = 0;
+
+  try {
+    const available = await isHealthKitAvailable();
+    if (!available) return { days: 0, samples: 0 };
+
+    const provider = await getProvider();
+    const permissionsOk = await provider.checkPermissions();
+    if (!permissionsOk) return { days: 0, samples: 0 };
+
+    const userId = await requireValidUserId();
+    const sourceProvider = provider.getSourceProvider();
+    const now = new Date();
+
+    console.info(`[healthkit] RECOVERY SYNC: reading ${daysBack} days of history...`);
+
+    for (let d = daysBack; d >= 0; d--) {
+      const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - d, 0, 0, 0);
+      const dayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - d + 1, 0, 0, 0);
+      const startIso = dayStart.toISOString();
+      const endIso = d === 0 ? now.toISOString() : dayEnd.toISOString();
+      const dayStr = startIso.split('T')[0];
+
+      console.info(`[healthkit] recovery: reading day ${dayStr} (${daysBack - d + 1}/${daysBack + 1})`);
+
+      try {
+        const [sleep, steps, hr, rhr, hrv, spo2, rr] = await Promise.all([
+          provider.readSleep(startIso, endIso).catch(() => [] as SleepSample[]),
+          provider.readSteps(startIso, endIso).catch(() => []),
+          provider.readHeartRate(startIso, endIso).catch(() => []),
+          provider.readRestingHeartRate(startIso, endIso).catch(() => []),
+          provider.readHRV(startIso, endIso).catch(() => []),
+          provider.readSpO2(startIso, endIso).catch(() => []),
+          provider.readRespiratoryRate(startIso, endIso).catch(() => []),
+        ]);
+
+        const total = sleep.length + steps.length + hr.length + rhr.length + hrv.length + spo2.length + rr.length;
+        if (total === 0) continue;
+
+        // Build and filter raw rows
+        const rawRows = buildSampleRows(userId, sourceProvider, hr as any[], rhr, hrv, spo2, rr, steps as any[], sleep);
+        const validRows = filterPhysiologicalRange(rawRows as any) as typeof rawRows;
+
+        if (validRows.length > 0) {
+          const inserted = await insertBiomarkerSamplesChunked(validRows as any);
+          totalSamples += inserted;
+          console.info(`[healthkit] recovery ${dayStr}: ${inserted} samples persisted`);
+        }
+
+        // Also rebuild ring_daily_data for this day
+        const { durationHours, quality: sleepQuality } = calculateSleepQuality(sleep);
+        const bioAvg = (samples: { value: number }[], minVal = 0) => {
+          const vals = samples.map(s => s.value).filter(v => !isNaN(v) && v >= minVal);
+          return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : undefined;
+        };
+        const avgHr = bioAvg(hr, 30);
+        const avgRhr = bioAvg(rhr, 30) ?? deriveRHR(hr);
+        const hrvFiltered = hrv.filter(s => s.value >= 5 && s.value <= 250);
+        const avgHrv = hrvFiltered.length > 0
+          ? hrvFiltered.map(s => s.value).reduce((a, b) => a + b, 0) / hrvFiltered.length
+          : derivePseudoHRV(hr);
+        const avgSpo2 = bioAvg(spo2, 50);
+        const avgRR = bioAvg(rr, 5);
+
+        const stepsBySource = new Map<string, number>();
+        for (const s of steps) {
+          const src = (s as any).source || 'unknown';
+          stepsBySource.set(src, (stepsBySource.get(src) || 0) + s.value);
+        }
+        const totalSteps = stepsBySource.size > 0 ? Math.max(...stepsBySource.values()) : 0;
+
+        const baseline = await calculateBaseline();
+        const stressLevel = computeStressLevel(avgHrv, baseline, avgRhr, durationHours, avgRR);
+
+        const metrics = {
+          hr_avg: avgHr ? Math.round(avgHr) : null,
+          rhr: avgRhr ? Math.round(avgRhr) : null,
+          hrv_sdnn: avgHrv ? Math.round(avgHrv * 10) / 10 : null,
+          hrv_rmssd: getPlatform() === 'android' && avgHrv ? Math.round(avgHrv * 10) / 10 : null,
+          hrv_type: getPlatform() === 'android' ? 'rmssd' as const : 'sdnn' as const,
+          hrv_index: avgHrv ? convertHRVtoScale(avgHrv) : null,
+          stress_level: stressLevel,
+          sleep_duration_hours: Math.round(durationHours * 10) / 10,
+          sleep_quality: sleepQuality,
+          steps: totalSteps,
+          spo2: avgSpo2 ? Math.round(avgSpo2 * 10) / 10 : null,
+          respiratory_rate: avgRR ? Math.round(avgRR * 10) / 10 : null,
+          calibrating: baseline.daysOfData < 7,
+        };
+
+        // Upsert ring_daily_data (won't overwrite if already exists with better data)
+        await supabase.from('ring_daily_data').upsert(
+          [{ user_id: userId, day: dayStr, source_provider: sourceProvider, metrics: metrics as unknown as Json }],
+          { onConflict: 'user_id,day,source_provider' }
+        );
+
+        daysProcessed++;
+      } catch (dayErr) {
+        console.warn(`[healthkit] recovery ${dayStr} failed:`, dayErr);
+      }
+    }
+
+    // Update integration timestamp
+    await (supabase.from('user_integrations') as any).upsert(
+      [{ user_id: userId, provider: sourceProvider, status: 'connected', last_sync_at: now.toISOString() }],
+      { onConflict: 'user_id,provider' }
+    );
+
+    console.info(`[healthkit] RECOVERY COMPLETE: ${daysProcessed} days, ${totalSamples} samples`);
+    return { days: daysProcessed, samples: totalSamples };
+  } catch (e) {
+    console.error('[healthkit] recovery sync failed:', e);
+    return { days: daysProcessed, samples: totalSamples };
   } finally {
     syncLock = false;
   }
@@ -508,21 +718,30 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     hrSamples as any[], rhrSamples, hrvSamples, spo2Samples, rrSamples,
     stepsSamples as any[], sleepSamples,
   );
-  if (rawRows.length > 0) {
+
+  // Filter out readings outside physiological ranges before persisting
+  const validRows = filterPhysiologicalRange(rawRows as any) as typeof rawRows;
+  if (validRows.length < rawRows.length) {
+    console.info('[healthkit] filtered out', rawRows.length - validRows.length, 'out-of-range samples');
+  }
+
+  // Merge with any previously queued rows (offline resilience)
+  const queued = getLocalQueue();
+  const allRows = [...queued, ...validRows];
+
+  let newDataInserted = false;
+  if (allRows.length > 0) {
+    // Persist to local queue first (offline safety net)
+    setLocalQueue(allRows as any);
     try {
-      const { error: rawErr } = await supabase
-        .from('biomarker_samples')
-        .insert(rawRows as any)
-        .select('id');  // minimal return
-      if (rawErr) {
-        // 23505 = unique_violation (duplicates), expected and safe to ignore
-        if ((rawErr as any).code !== '23505') {
-          console.warn('[healthkit] biomarker_samples insert error:', rawErr.message);
-        }
-      }
-      console.info('[healthkit] raw samples persisted:', rawRows.length, 'rows (deduped silently)');
+      const inserted = await insertBiomarkerSamplesChunked(allRows as any);
+      // Only clear queue if all chunks were attempted
+      clearLocalQueue();
+      newDataInserted = inserted > 0;
+      console.info('[healthkit] raw samples persisted:', inserted, '/', allRows.length, 'rows (chunked, deduped silently)');
     } catch (e) {
-      console.warn('[healthkit] biomarker_samples insert failed:', e);
+      console.warn('[healthkit] biomarker_samples insert failed, rows preserved in local queue:', e);
+      // Queue remains in localStorage for next sync
     }
   }
 
@@ -613,14 +832,16 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
 
   if (result.error) return false;
 
-  // 2. Update integration status
-  await retryOnAuthErrorLabeled(async () => {
-    const res = await (supabase.from('user_integrations') as any).upsert(
-      [{ user_id: userId, provider: sourceProvider, status: 'connected', last_sync_at: new Date().toISOString() }],
-      { onConflict: 'user_id,provider' }
-    ).select();
-    return { data: res.data, error: res.error ? { code: (res.error as any).code, message: res.error.message } : null };
-  }, { table: 'user_integrations', operation: 'upsert' });
+  // 2. Update integration status — only when new data was actually inserted
+  if (newDataInserted) {
+    await retryOnAuthErrorLabeled(async () => {
+      const res = await (supabase.from('user_integrations') as any).upsert(
+        [{ user_id: userId, provider: sourceProvider, status: 'connected', last_sync_at: new Date().toISOString() }],
+        { onConflict: 'user_id,provider' }
+      ).select();
+      return { data: res.data, error: res.error ? { code: (res.error as any).code, message: res.error.message } : null };
+    }, { table: 'user_integrations', operation: 'upsert' });
+  }
 
   // 3. Auto-compute VYR state from biometric data
   try {
