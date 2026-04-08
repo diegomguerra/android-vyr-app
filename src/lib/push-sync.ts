@@ -27,15 +27,12 @@ export async function registerPushToken(userId: string): Promise<void> {
       return;
     }
 
-    // Register with FCM/APNs
-    await PushNotifications.register();
-
-    // Listen for token
-    PushNotifications.addListener('registration', async (token) => {
+    // Listen for token BEFORE calling register() to avoid race condition
+    await PushNotifications.addListener('registration', async (token) => {
       console.info('[push-sync] Push token received:', token.value.substring(0, 20) + '...');
 
       try {
-        await supabase.from('push_tokens').upsert(
+        const { error } = await supabase.from('push_tokens').upsert(
           {
             user_id: userId,
             platform: 'android',
@@ -46,15 +43,23 @@ export async function registerPushToken(userId: string): Promise<void> {
           },
           { onConflict: 'user_id,platform' }
         );
-        console.info('[push-sync] Push token saved to Supabase');
+        if (error) {
+          console.error('[push-sync] Failed to save push token:', error.message, error.code);
+        } else {
+          console.info('[push-sync] Push token saved to Supabase');
+        }
       } catch (e) {
         console.error('[push-sync] Failed to save push token:', e);
       }
     });
 
-    PushNotifications.addListener('registrationError', (error) => {
-      console.error('[push-sync] Push registration error:', error);
+    await PushNotifications.addListener('registrationError', (error) => {
+      console.error('[push-sync] Push registration error:', JSON.stringify(error));
     });
+
+    // Register with FCM AFTER listeners are bound
+    await PushNotifications.register();
+    console.info('[push-sync] PushNotifications.register() called');
   } catch (e) {
     console.error('[push-sync] registerPushToken error:', e);
   }
