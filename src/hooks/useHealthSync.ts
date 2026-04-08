@@ -10,6 +10,7 @@ import {
 } from '@/lib/healthkit';
 import { getPlatform } from '@/lib/health-provider';
 import { supabase } from '@/integrations/supabase/client';
+import { registerPushToken, setupPushSyncHandler, unregisterPushToken } from '@/lib/push-sync';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
 /**
@@ -111,6 +112,10 @@ export function useHealthSync() {
 
       // Re-enable background sync (iOS observers, etc.)
       await enableHealthKitBackgroundSync();
+
+      // Register push token for background sync via admin dashboard
+      await registerPushToken(userId);
+      setupPushSyncHandler();
 
       console.info('[health-sync] auto-reconnected, triggering initial sync');
       await throttledSync();
@@ -301,5 +306,11 @@ export function useHealthSync() {
       lastSyncRef.current = 0;
       stopPeriodicSync();
     }
+    return () => {
+      // Deactivate push token on logout
+      if (userId) {
+        void unregisterPushToken(userId);
+      }
+    };
   }, [userId, stopPeriodicSync]);
 }
