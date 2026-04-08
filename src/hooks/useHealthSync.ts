@@ -6,9 +6,11 @@ import {
   checkHealthKitPermissions,
   enableHealthKitBackgroundSync,
   runIncrementalHealthSync,
+  syncHealthKitData,
 } from '@/lib/healthkit';
 import { getPlatform } from '@/lib/health-provider';
 import { supabase } from '@/integrations/supabase/client';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 /**
  * Sync interval while app is in foreground (15 minutes).
@@ -141,6 +143,51 @@ export function useHealthSync() {
     }
   }, []);
 
+  /**
+   * Handle a remote sync command from the admin dashboard.
+   * Triggers a full sync and updates the command status in Supabase.
+   */
+  const handleSyncCommand = useCallback(async (commandId: string, command: string) => {
+    console.info('[health-sync] Received remote sync command:', command, '(id:', commandId, ')');
+
+    // Mark as received
+    await supabase
+      .from('sync_commands')
+      .update({ status: 'received', updated_at: new Date().toISOString() })
+      .eq('id', commandId);
+
+    try {
+      // Force a full sync (bypass throttle for admin-triggered syncs)
+      lastSyncRef.current = 0;
+      const ok = await syncHealthKitData();
+
+      await supabase
+        .from('sync_commands')
+        .update({
+          status: ok ? 'completed' : 'failed',
+          updated_at: new Date().toISOString(),
+          completed_at: new Date().toISOString(),
+          result: ok
+            ? { synced_at: new Date().toISOString(), source: 'health_connect' }
+            : { error: 'syncHealthKitData returned false' },
+        })
+        .eq('id', commandId);
+
+      console.info('[health-sync] Remote sync', ok ? 'completed' : 'failed');
+    } catch (e: any) {
+      console.error('[health-sync] Remote sync error:', e);
+      await supabase
+        .from('sync_commands')
+        .update({
+          status: 'failed',
+          updated_at: new Date().toISOString(),
+          completed_at: new Date().toISOString(),
+          result: { error: e?.message || 'Unknown error' },
+        })
+        .eq('id', commandId);
+    }
+  }, []);
+
   // ── Main effect: lifecycle management ──
   useEffect(() => {
     if (!userId) return;
@@ -192,13 +239,60 @@ export function useHealthSync() {
       // Expected on web
     });
 
+    // 5. Listen for remote sync commands via Supabase Realtime
+    let syncChannel: RealtimeChannel | null = null;
+
+    syncChannel = supabase
+      .channel(`sync-commands-${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'sync_commands',
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload: any) => {
+          const record = payload.new;
+          if (record && (record.status === 'pending' || record.status === 'sent')) {
+            void handleSyncCommand(record.id, record.command);
+          }
+        }
+      )
+      .subscribe((status: string) => {
+        console.info('[health-sync] sync_commands realtime:', status);
+      });
+
+    // 6. Check for any pending sync commands on mount (in case inserted while offline)
+    void (async () => {
+      try {
+        const { data: pending } = await supabase
+          .from('sync_commands')
+          .select('id, command')
+          .eq('user_id', userId)
+          .in('status', ['pending', 'sent'])
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        if (pending && pending.length > 0) {
+          console.info('[health-sync] Found pending sync command on mount:', pending[0].id);
+          void handleSyncCommand(pending[0].id, pending[0].command);
+        }
+      } catch (e) {
+        console.warn('[health-sync] Failed to check pending sync commands:', e);
+      }
+    })();
+
     return () => {
       mountedRef.current = false;
       stopPeriodicSync();
       appStateListener?.remove().catch(() => {});
       resumeListener?.remove().catch(() => {});
+      if (syncChannel) {
+        supabase.removeChannel(syncChannel);
+      }
     };
-  }, [userId, autoReconnect, throttledSync, startPeriodicSync, stopPeriodicSync]);
+  }, [userId, autoReconnect, throttledSync, startPeriodicSync, stopPeriodicSync, handleSyncCommand]);
 
   // ── Reset on logout ──
   useEffect(() => {
