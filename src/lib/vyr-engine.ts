@@ -238,6 +238,46 @@ export function computeScore(pillars: PillarScore): number {
   return Math.round((avg * 0.6 + min * 0.4) / 5 * 100);
 }
 
+/**
+ * V4 scoring — weighted geometric mean with imbalance penalty, trend modifier
+ * and data-quality gap penalty. Kept in sync with cognitive-architect.
+ */
+export function computeScoreV4(
+  pillars: PillarScore,
+  rhr_trend_3d?: number | null,
+  quality_scores?: { energia?: number; clareza?: number; estabilidade?: number },
+): number {
+  const { energia: E, clareza: C, estabilidade: S } = pillars;
+  const eS = Math.max(0.01, E);
+  const cS = Math.max(0.01, C);
+  const sS = Math.max(0.01, S);
+  const geomMean = Math.pow(eS, 0.35) * Math.pow(cS, 0.30) * Math.pow(sS, 0.35);
+  const scoreBase = (geomMean / 5) * 100;
+
+  const spread = Math.max(E, C, S) - Math.min(E, C, S);
+  const imbalancePenalty = spread > 1.5 ? (spread - 1.5) * 0.06 : 0;
+
+  let trendMod = 1.0;
+  if (rhr_trend_3d != null && !isNaN(rhr_trend_3d)) {
+    trendMod = clamp(1 + rhr_trend_3d * -0.02, 0.90, 1.10);
+  }
+
+  let qualityPenalty = 0;
+  if (quality_scores) {
+    const qE = quality_scores.energia ?? 1;
+    const qC = quality_scores.clareza ?? 1;
+    const qS = quality_scores.estabilidade ?? 1;
+    qualityPenalty = (
+      (1 - qE) * 0.15 * 0.35 +
+      (1 - qC) * 0.15 * 0.30 +
+      (1 - qS) * 0.15 * 0.35
+    );
+  }
+
+  const raw = scoreBase * (1 - imbalancePenalty) * trendMod * (1 - qualityPenalty);
+  return Math.round(clamp(raw, 0, 100));
+}
+
 export function getLevel(score: number): string {
   if (score >= 85) return 'Ótimo';
   if (score >= 70) return 'Bom';

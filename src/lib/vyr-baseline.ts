@@ -137,21 +137,26 @@ async function getPopulationBaseline(daysOfData = 0): Promise<BaselineMetrics> {
     };
   }
 
-  const find = (metrica: string) => {
+  const find = (metrica: string, metricKey: string) => {
     const r = refs.find((ref: any) => ref.metrica === metrica);
     if (!r) return null;
     const mean = (r.faixa_min + r.faixa_max) / 2;
-    const std = (r.faixa_max - r.faixa_min) / 4; // approximate
+    let std = (r.faixa_max - r.faixa_min) / 4; // approximate
+    if (MIN_STD[metricKey]) {
+      std = Math.max(std, MIN_STD[metricKey]);
+    }
     return { mean: Math.round(mean * 100) / 100, std: Math.round(std * 100) / 100 };
   };
 
+  // HRV baseline must live in 0-100 index space (same space as engine input).
+  // Legacy referencias_populacionais.hrv_sdnn stored raw ms — unusable as-is.
   return {
-    rhr: find('rhr') || { mean: 65, std: 10 },
-    hrv: find('hrv_sdnn') || { mean: 55, std: 12 },
+    rhr: find('rhr', 'rhr') || { mean: 65, std: 10 },
+    hrv: find('hrv_index', 'hrv') || { mean: 55, std: 12 },
     hrvLn: { mean: Math.log(40), std: 0.4 },
-    sleepDuration: find('sleep_duration') || { mean: 7, std: 1 },
-    sleepQuality: find('sleep_quality') || { mean: 60, std: 15 },
-    spo2: find('spo2') || { mean: 97, std: 1.5 },
+    sleepDuration: find('sleep_duration', 'sleepDuration') || { mean: 7, std: 1 },
+    sleepQuality: find('sleep_quality', 'sleepQuality') || { mean: 60, std: 15 },
+    spo2: find('spo2', 'spo2') || { mean: 97, std: 1.5 },
     daysOfData,
   };
 }
