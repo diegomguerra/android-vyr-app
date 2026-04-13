@@ -32,12 +32,17 @@ class HealthConnectPlugin : Plugin() {
             val call = pendingPermissionCall ?: return
             pendingPermissionCall = null
             val ret = JSObject()
-            // Check that ALL required permissions were granted, not just any
-            val allGranted = granted.containsAll(requiredPermissions)
-            ret.put("granted", allGranted)
+            // Accept any partial grant — sync what we can, report what we can't.
+            // Previously the plugin required ALL permissions, which blocked sync
+            // entirely if the user denied even a single biomarker type.
+            val anyGranted = granted.isNotEmpty()
+            val missing = requiredPermissions - granted
+            ret.put("granted", anyGranted)
             ret.put("grantedCount", granted.size)
             ret.put("requiredCount", requiredPermissions.size)
-            Log.d("HealthConnectPlugin", "onPermissionsResult: granted=${granted.size}/${requiredPermissions.size}, allGranted=$allGranted")
+            ret.put("allGranted", granted.containsAll(requiredPermissions))
+            ret.put("missing", JSArray(missing.toList()))
+            Log.d("HealthConnectPlugin", "onPermissionsResult: granted=${granted.size}/${requiredPermissions.size}, missing=$missing")
             call.resolve(ret)
         }
     }
@@ -79,12 +84,17 @@ class HealthConnectPlugin : Plugin() {
             try {
                 val client = getClient()
                 val granted = client.permissionController.getGrantedPermissions()
-                val allGranted = granted.containsAll(PERMISSIONS)
-                Log.d(TAG, "hasAllPermissions: ${granted.size}/${PERMISSIONS.size}, allGranted=$allGranted")
+                val missing = PERMISSIONS - granted
+                // Return granted=true if ANY permission is present so sync can
+                // still run with whatever data types the user authorized.
+                val anyGranted = granted.isNotEmpty()
+                Log.d(TAG, "hasAllPermissions: ${granted.size}/${PERMISSIONS.size}, missing=$missing")
                 val ret = JSObject()
-                ret.put("granted", allGranted)
+                ret.put("granted", anyGranted)
+                ret.put("allGranted", granted.containsAll(PERMISSIONS))
                 ret.put("grantedCount", granted.size)
                 ret.put("requiredCount", PERMISSIONS.size)
+                ret.put("missing", JSArray(missing.toList()))
                 call.resolve(ret)
             } catch (e: Exception) {
                 Log.e(TAG, "hasAllPermissions error", e)

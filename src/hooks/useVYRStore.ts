@@ -86,9 +86,13 @@ export function useVYRStore() {
         .eq('user_id', userId).order('day', { ascending: false }).limit(7),
       (supabase.from('user_integrations').select('provider, status, last_sync_at, scopes')
         .eq('user_id', userId).eq('provider', 'health_connect').maybeSingle() as any),
-      (supabase.from('participantes').select('nome_publico')
+      (supabase.from('participantes').select('nome_publico, onboarding_completo')
         .eq('user_id', userId).maybeSingle() as any),
     ]);
+
+    // Only allow health sync after onboarding — prevents orphan biomarker rows
+    // from users who signed up but never completed participantes setup.
+    const onboardingDone = (nameRes.data as any)?.onboarding_completo === true;
 
     // History
     if (statesRes.data && statesRes.data.length > 0) {
@@ -149,7 +153,7 @@ export function useVYRStore() {
         scopes: integrationRes.data.scopes || [],
       });
       // Re-enable background sync on load if integration is active (iOS observers)
-      if (status === 'active' || status === 'connected') {
+      if ((status === 'active' || status === 'connected') && onboardingDone) {
         enableHealthKitBackgroundSync().catch(() => {});
       }
     }
@@ -215,9 +219,17 @@ export function useVYRStore() {
   const connectWearable = useCallback(async () => {
     const available = await isHealthKitAvailable();
     if (!available) return false;
+    // Gate on onboarding — never create user_integrations before participantes exists
+    const uidPre = await requireValidUserId();
+    const { data: partRow } = await (supabase.from('participantes') as any)
+      .select('onboarding_completo').eq('user_id', uidPre).maybeSingle();
+    if (partRow?.onboarding_completo !== true) {
+      console.warn('[useVYRStore] connectWearable blocked: onboarding not completed');
+      return false;
+    }
     const ok = await requestHealthKitPermissions();
     if (ok) {
-      const uid = await requireValidUserId();
+      const uid = uidPre;
       await retryOnAuthErrorLabeled(async () => {
         const result = await (supabase.from('user_integrations') as any).upsert({
           user_id: uid,
