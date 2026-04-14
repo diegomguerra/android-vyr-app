@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Bluetooth, Loader2, RefreshCw, Check, AlertCircle, Unplug, Info, Watch } from 'lucide-react';
+import { Bluetooth, Loader2, RefreshCw, Check, AlertCircle, Unplug, Info, Watch, Circle } from 'lucide-react';
 import { wearableStore } from './wearable.store';
 import { flushSamplesToBackend } from './wearable.sync';
 import { isDebugEnabled } from './wearable.telemetry';
@@ -52,8 +52,14 @@ export default function WearableModule() {
   };
   const handleDisconnect = () => wearableStore.disconnect();
 
-  const modelLabel = selectedModel === 'J5Vital' ? 'J-Style J5Vital' : 'J-Style Ring X3';
-  const modelIcon = selectedModel === 'J5Vital' ? Watch : Bluetooth;
+  const modelLabel =
+    selectedModel === 'J5Vital' ? 'J-Style J5Vital'
+    : selectedModel === 'QRing' ? 'QRing (Colmi R02/R06)'
+    : 'J-Style Ring X3';
+  const modelIcon =
+    selectedModel === 'J5Vital' ? Watch
+    : selectedModel === 'QRing' ? Circle
+    : Bluetooth;
   const ModelIcon = modelIcon;
 
   return (

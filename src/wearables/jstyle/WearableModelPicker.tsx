@@ -2,7 +2,7 @@
  * WearableModelPicker — Select between X3 ring and J5Vital bracelet.
  */
 
-import { Bluetooth, Watch } from 'lucide-react';
+import { Bluetooth, Watch, Circle } from 'lucide-react';
 import type { WearableModel } from './wearable.types';
 
 interface Props {
@@ -11,15 +11,16 @@ interface Props {
 }
 
 const MODELS: { id: WearableModel; label: string; desc: string; Icon: typeof Bluetooth }[] = [
-  { id: 'X3', label: 'Ring X3', desc: 'Anel inteligente', Icon: Bluetooth },
-  { id: 'J5Vital', label: 'J5Vital', desc: 'Pulseira V5', Icon: Watch },
+  { id: 'X3', label: 'Ring X3', desc: 'J-Style', Icon: Bluetooth },
+  { id: 'J5Vital', label: 'J5Vital', desc: 'J-Style V5', Icon: Watch },
+  { id: 'QRing', label: 'QRing', desc: 'Colmi R02/R06', Icon: Circle },
 ];
 
 export default function WearableModelPicker({ selected, onSelect }: Props) {
   return (
     <div className="rounded-2xl bg-card border border-border p-4 space-y-2">
       <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Modelo do dispositivo</h3>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-3 gap-2">
         {MODELS.map(({ id, label, desc, Icon }) => {
           const active = selected === id;
           return (

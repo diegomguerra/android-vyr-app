@@ -17,9 +17,11 @@ import type {
 import { CORE_BIOMARKER_TYPES, V5_EXTENDED_TYPES, isV5ExtendedEnabled } from './wearable.types';
 import { JStyleAdapter } from './JStyleAdapter';
 import { JStyleV5Adapter } from './v5/JStyleV5Adapter';
+import { QRingAdapter } from '../qring/QRingAdapter';
 import { wlog } from './wearable.telemetry';
 
 const JSTYLE_ENABLED = import.meta.env.VITE_JSTYLE_ENABLED !== 'false';
+const QRING_ENABLED = import.meta.env.VITE_QRING_ENABLED !== 'false';
 
 export interface WearableState {
   status: WearableStatus;
@@ -50,15 +52,22 @@ class WearableStore {
   private listeners = new Set<() => void>();
   private adapterX3 = new JStyleAdapter();
   private adapterV5 = new JStyleV5Adapter();
+  private adapterQRing = new QRingAdapter();
 
   get adapter(): WearableAdapter {
-    return this.state.selectedModel === 'J5Vital' ? this.adapterV5 : this.adapterX3;
+    if (this.state.selectedModel === 'J5Vital') return this.adapterV5;
+    if (this.state.selectedModel === 'QRing') return this.adapterQRing;
+    return this.adapterX3;
   }
 
   constructor() {
-    if (!JSTYLE_ENABLED) return;
-    this.wireAdapter(this.adapterX3);
-    this.wireAdapter(this.adapterV5);
+    if (JSTYLE_ENABLED) {
+      this.wireAdapter(this.adapterX3);
+      this.wireAdapter(this.adapterV5);
+    }
+    if (QRING_ENABLED) {
+      this.wireAdapter(this.adapterQRing);
+    }
   }
 
   private wireAdapter(adapter: WearableAdapter) {
@@ -124,6 +133,7 @@ class WearableStore {
     if (this.state.selectedModel === 'J5Vital' && isV5ExtendedEnabled()) {
       return [...core, ...V5_EXTENDED_TYPES];
     }
+    // QRing exposes all core types + stress (stress is returned as BiomarkerTypeCore['stress'?])
     return core;
   }
 

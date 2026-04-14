@@ -1,7 +1,7 @@
 /** Wearable types — production contract */
 
 /** Supported wearable models */
-export type WearableModel = 'X3' | 'J5Vital';
+export type WearableModel = 'X3' | 'J5Vital' | 'QRing';
 
 /** Device discovered during BLE scan */
 export interface WearableDevice {
@@ -22,14 +22,16 @@ export type WearableStatus =
   | 'disconnected'
   | 'error';
 
-/** Core biomarker types (shared X3 + V5) */
+/** Core biomarker types (shared X3 + V5 + QRing) */
 export type BiomarkerTypeCore =
   | 'sleep'
   | 'hrv'
   | 'spo2'
   | 'temp'
   | 'steps'
-  | 'hr';
+  | 'hr'
+  | 'rhr'
+  | 'stress';
 
 /** Extended biomarker types (V5 only, feature-flagged) */
 export type BiomarkerTypeV5 =
@@ -38,6 +40,9 @@ export type BiomarkerTypeV5 =
   | 'ppg'
   | 'ppi'
   | 'rr_interval';
+
+/** QRing-specific biomarker types (subset of core + stress) */
+export type BiomarkerTypeQRing = BiomarkerTypeCore | 'stress';
 
 /** All biomarker types */
 export type BiomarkerType = BiomarkerTypeCore | BiomarkerTypeV5;
@@ -118,7 +123,7 @@ export const V5_EXTENDED_TYPES: BiomarkerTypeV5[] = [
 
 /** Core types shared by all models */
 export const CORE_BIOMARKER_TYPES: BiomarkerTypeCore[] = [
-  'sleep', 'hrv', 'spo2', 'temp', 'steps', 'hr',
+  'sleep', 'hrv', 'spo2', 'temp', 'steps', 'hr', 'rhr', 'stress',
 ];
 
 /** Check if V5 extended types are enabled */
