@@ -166,6 +166,15 @@ class QRingPlugin : Plugin() {
     private var expectedStepsPackets: Int = -1
     private var receivedStepsPackets: Int = 0
 
+    // Monotonic sample sequence — ensures each emitted sample has a unique
+    // timestamp sub-millisecond. Backend has UNIQUE index on
+    // (user_id, type, ts, source), so two samples with the same ms collide.
+    private var sampleSeq: Double = 0.0
+    private fun nowMsUnique(): Double {
+        sampleSeq += 1.0
+        return System.currentTimeMillis().toDouble() + sampleSeq
+    }
+
     // =============================================================
     //  Public API — Capacitor plugin methods
     // =============================================================
@@ -319,6 +328,7 @@ class QRingPlugin : Plugin() {
         receivedHrPackets = 0
         expectedStepsPackets = -1
         receivedStepsPackets = 0
+        sampleSeq = 0.0
 
         scope.launch {
             // Sequence per Puxtril + Gadgetbridge:
@@ -894,7 +904,7 @@ class QRingPlugin : Plugin() {
     private fun parseSleepHistory(b: ByteArray) {
         val sample = JSObject()
         sample.put("type", "sleep")
-        sample.put("ts", System.currentTimeMillis())
+        sample.put("ts", nowMsUnique())
         sample.put("raw", b.toHex())
         sleepSamples.add(sample)
         if (sleepSamples.size >= 1) {
@@ -911,7 +921,7 @@ class QRingPlugin : Plugin() {
         if (pct in 50..100) {
             val s = JSObject()
             s.put("type", "spo2")
-            s.put("ts", System.currentTimeMillis())
+            s.put("ts", nowMsUnique())
             s.put("value", pct)
             spo2Samples.add(s)
         }
@@ -929,7 +939,7 @@ class QRingPlugin : Plugin() {
         if (v in 1..100) {
             val s = JSObject()
             s.put("type", "stress")
-            s.put("ts", System.currentTimeMillis())
+            s.put("ts", nowMsUnique())
             s.put("value", v)
             stressSamples.add(s)
         }
@@ -947,7 +957,7 @@ class QRingPlugin : Plugin() {
         if (v in 5..250) {
             val s = JSObject()
             s.put("type", "hrv")
-            s.put("ts", System.currentTimeMillis())
+            s.put("ts", nowMsUnique())
             s.put("value", v)
             hrvSamples.add(s)
         }
