@@ -416,6 +416,7 @@ class QRingPlugin : Plugin() {
             n.contains("R02") -> "R02"
             n.contains("R03") -> "R03"
             n.contains("R06") -> "R06"
+            n.contains("R09") -> "R09"
             n.contains("R10") -> "R10"
             else -> "R02"
         }
