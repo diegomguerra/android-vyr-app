@@ -31,7 +31,8 @@ export type BiomarkerTypeCore =
   | 'steps'
   | 'hr'
   | 'rhr'
-  | 'stress';
+  | 'stress'
+  | 'debug_raw';    // Raw BLE notify dump for reverse engineering (R09 history parser)
 
 /** Extended biomarker types (V5 only, feature-flagged) */
 export type BiomarkerTypeV5 =

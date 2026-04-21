@@ -91,27 +91,41 @@ class QRingPlugin : Plugin() {
     companion object {
         private const val TAG = "QRingPlugin"
 
+        // V1 Nordic-UART-like protocol (16-byte packets + checksum)
         private val SERVICE_UUID: UUID = UUID.fromString("6E40FFF0-B5A3-F393-E0A9-E50E24DCCA9E")
         private val WRITE_UUID: UUID   = UUID.fromString("6E400002-B5A3-F393-E0A9-E50E24DCCA9E")
         private val NOTIFY_UUID: UUID  = UUID.fromString("6E400003-B5A3-F393-E0A9-E50E24DCCA9E")
+
+        // V2 "big data" protocol — used by R09 for temperature history.
+        // Raw variable-length packets, NO pad, NO checksum.
+        // Reference: Gadgetbridge Yawell Ring support (AGPL, algorithms only).
+        private val SERVICE_UUID_V2: UUID = UUID.fromString("DE5BF728-D711-4E47-AF26-65E3012A5DC7")
+        private val WRITE_UUID_V2: UUID   = UUID.fromString("DE5BF72A-D711-4E47-AF26-65E3012A5DC7")
+        private val NOTIFY_UUID_V2: UUID  = UUID.fromString("DE5BF729-D711-4E47-AF26-65E3012A5DC7")
+
         private val CCCD_UUID: UUID    = UUID.fromString("00002902-0000-1000-8000-00805F9B34FB")
 
         // Device Info Service (standard BLE)
         private val DEVICE_INFO_SERVICE: UUID = UUID.fromString("0000180a-0000-1000-8000-00805f9b34fb")
         private val FIRMWARE_REV_UUID: UUID   = UUID.fromString("00002a26-0000-1000-8000-00805f9b34fb")
 
-        // Command IDs
-        private const val CMD_SET_TIME:     Byte = 0x01
-        private const val CMD_BATTERY:      Byte = 0x03
-        private const val CMD_HR_HISTORY:   Byte = 0x15
-        private const val CMD_HR_SETTINGS:  Byte = 0x16
-        private const val CMD_SPO2_HISTORY: Byte = 0x2C
-        private const val CMD_STRESS_HIST:  Byte = 0x37
-        private const val CMD_HRV_HISTORY:  Byte = 0x39
-        private const val CMD_STEPS_HIST:   Byte = 0x43
-        private const val CMD_SLEEP_HIST:   Byte = 0x44
-        private const val CMD_REALTIME:     Byte = 0x69
-        private const val CMD_STOP_REALTIME: Byte = 0x6A
+        // V1 Command IDs
+        private const val CMD_SET_TIME:        Byte = 0x01
+        private const val CMD_BATTERY:         Byte = 0x03
+        private const val CMD_HR_HISTORY:      Byte = 0x15
+        private const val CMD_HR_SETTINGS:     Byte = 0x16
+        private const val CMD_SPO2_HISTORY:    Byte = 0x2C
+        private const val CMD_STRESS_HIST:     Byte = 0x37
+        private const val CMD_AUTO_TEMP_PREF:  Byte = 0x3A    // R09: enable continuous temperature
+        private const val CMD_HRV_HISTORY:     Byte = 0x39
+        private const val CMD_STEPS_HIST:      Byte = 0x43
+        private const val CMD_SLEEP_HIST:      Byte = 0x44
+        private const val CMD_REALTIME:        Byte = 0x69
+        private const val CMD_STOP_REALTIME:   Byte = 0x6A
+
+        // V2 Command IDs
+        private const val CMD_BIG_DATA_V2:         Byte = 0xBC.toByte()
+        private const val BIG_DATA_TYPE_TEMP:      Byte = 0x25
 
         // Realtime sub-types
         private const val RT_TYPE_HR:   Byte = 0x01
@@ -134,6 +148,9 @@ class QRingPlugin : Plugin() {
     private var gatt: BluetoothGatt? = null
     private var writeChar: BluetoothGattCharacteristic? = null
     private var notifyChar: BluetoothGattCharacteristic? = null
+    // V2 characteristics (temperature channel, R09-only)
+    private var writeCharV2: BluetoothGattCharacteristic? = null
+    private var notifyCharV2: BluetoothGattCharacteristic? = null
     private var firmwareRev: String? = null
     private var currentDeviceMac: String? = null
     private var currentDeviceName: String? = null
@@ -142,13 +159,25 @@ class QRingPlugin : Plugin() {
     private var pendingSyncCall: PluginCall? = null
 
     // --- BLE op queue (write char, write descriptor, read char) ---
+    // Android BLE is strictly serialized — one pending op at a time. V1 + V2
+    // share the same queue but use different characteristics (WriteChar vs
+    // WriteCharV2) to target the right one.
     private sealed class BleOp {
         data class WriteChar(val bytes: ByteArray) : BleOp()
+        data class WriteCharV2(val bytes: ByteArray) : BleOp()
         data class WriteDescriptor(val descriptor: BluetoothGattDescriptor, val bytes: ByteArray) : BleOp()
         data class ReadChar(val characteristic: BluetoothGattCharacteristic) : BleOp()
     }
     private val opQueue = ArrayDeque<BleOp>()
     private var opInFlight = false
+
+    // --- Feature flags (runtime-configurable via sync options) ---
+    // historyEnabled: send V1 history commands (0x15, 0x43, 0x44, 0x2C, 0x37, 0x39).
+    //   Default OFF because R09 parser emits garbage for some types. Flip ON once
+    //   a validated parser is in place.
+    // debugRawEnabled: emit every notify as a 'debug_raw' sample for reverse engineering.
+    private var historyEnabled = false
+    private var debugRawEnabled = true
 
     // --- Sync buffers ---
     private val hrSamples = mutableListOf<JSObject>()
@@ -157,6 +186,17 @@ class QRingPlugin : Plugin() {
     private val spo2Samples = mutableListOf<JSObject>()
     private val hrvSamples = mutableListOf<JSObject>()
     private val stressSamples = mutableListOf<JSObject>()
+    private val tempSamples = mutableListOf<JSObject>()
+    private val realtimeHrSamples = mutableListOf<JSObject>()
+    private val realtimeSpo2Samples = mutableListOf<JSObject>()
+    private val realtimeHrvSamples = mutableListOf<JSObject>()
+    private val debugRawSamples = mutableListOf<JSObject>()
+
+    // --- V2 temperature assembler ---
+    // V2 responses can span multiple BLE notifications; accumulate until we've
+    // received the declared payload length.
+    private var tempBuffer: ByteArray = ByteArray(0)
+    private var tempExpectedLength: Int = -1
 
     private var expectedHrPackets: Int = -1
     private var receivedHrPackets: Int = 0
@@ -317,6 +357,10 @@ class QRingPlugin : Plugin() {
             return
         }
         pendingSyncCall = call
+        // Flags from JS layer override defaults
+        call.getBoolean("historyEnabled")?.let { historyEnabled = it }
+        call.getBoolean("debugRawEnabled")?.let { debugRawEnabled = it }
+
         // Reset buffers
         hrSamples.clear()
         stepsSamples.clear()
@@ -324,6 +368,13 @@ class QRingPlugin : Plugin() {
         spo2Samples.clear()
         hrvSamples.clear()
         stressSamples.clear()
+        tempSamples.clear()
+        realtimeHrSamples.clear()
+        realtimeSpo2Samples.clear()
+        realtimeHrvSamples.clear()
+        debugRawSamples.clear()
+        tempBuffer = ByteArray(0)
+        tempExpectedLength = -1
         expectedHrPackets = -1
         receivedHrPackets = 0
         expectedStepsPackets = -1
@@ -331,38 +382,59 @@ class QRingPlugin : Plugin() {
         sampleSeq = 0.0
 
         scope.launch {
-            // Sequence per Puxtril + Gadgetbridge:
-            //   1. SetTime   (required before history queries, else empty)
-            //   2. Battery   (smoke test)
-            //   3. HR Settings (ensure auto-HR every 5 min persisted)
-            //   4. HR History   (today)
-            //   5. Steps History (today)
-            //   6. Sleep History (today)     v1.5
-            //   7. SpO2 History (today)      v1.5
-            //   8. Stress History (today)    v1.5
-            //   9. HRV History (today)       v1.5 if fw>=3.00.10
+            // Phase 1: setup — SetTime + Battery + enable temperature on ring
             sendSetTime()
             delay(200)
             sendBattery()
-            delay(200)
-            sendHRSettings(enable = true, intervalMinutes = 5)
-            delay(200)
-            sendHRHistory(dayOffset = 0)
             delay(300)
-            sendStepsHistory(dayOffset = 0)
-            delay(300)
-            sendSleepHistory(dayOffset = 0)
-            delay(200)
-            sendSpo2History(dayOffset = 0)
-            delay(200)
-            sendStressHistory(dayOffset = 0)
-            delay(200)
+            sendTemperaturePref(enable = true)
+            delay(500)
+
+            // Phase 2: V2 temperature history request (R09). Skipped silently
+            // if writeCharV2 is unavailable (older rings don't have V2 service).
+            sendTemperatureHistoryRequest()
+            delay(1000)
+
+            // Phase 3: realtime snapshots — HR, SpO2, HRV (10s each; ring auto-stops).
+            // Space them so each type's 10s window completes before the next starts.
+            sendRealtime(RT_TYPE_HR)
+            delay(2500)
+            sendRealtime(RT_TYPE_SPO2)
+            delay(2500)
             if (isHrvSupported()) {
-                sendHrvHistory(dayOffset = 0)
-                delay(200)
+                sendRealtime(RT_TYPE_HRV)
+                delay(2500)
             }
-            // Signal end of sync after quiet period
-            delay(1500)
+
+            // Phase 4 (optional, gated): V1 history commands — only if flag enabled.
+            if (historyEnabled) {
+                sendHRSettings(enable = true, intervalMinutes = 5)
+                delay(200)
+                sendHRHistory(dayOffset = 0)
+                delay(300)
+                sendStepsHistory(dayOffset = 0)
+                delay(300)
+                sendSleepHistory(dayOffset = 0)
+                delay(200)
+                sendSpo2History(dayOffset = 0)
+                delay(200)
+                sendStressHistory(dayOffset = 0)
+                delay(200)
+                if (isHrvSupported()) {
+                    sendHrvHistory(dayOffset = 0)
+                    delay(200)
+                }
+            }
+
+            // Phase 5: quiet period then resolve
+            delay(if (historyEnabled) 2500 else 1500)
+
+            // Flush realtime batches as syncData events so frontend picks them up
+            flushRealtimeBatch("hr_realtime", realtimeHrSamples)
+            flushRealtimeBatch("spo2_realtime", realtimeSpo2Samples)
+            flushRealtimeBatch("hrv_realtime", realtimeHrvSamples)
+            flushDebugRawBatch(force = true)
+
             pendingSyncCall?.let { c ->
                 val ret = JSObject()
                 ret.put("hr_count", hrSamples.size)
@@ -371,12 +443,27 @@ class QRingPlugin : Plugin() {
                 ret.put("spo2_count", spo2Samples.size)
                 ret.put("hrv_count", hrvSamples.size)
                 ret.put("stress_count", stressSamples.size)
+                ret.put("temp_count", tempSamples.size)
+                ret.put("rt_hr_count", realtimeHrSamples.size)
+                ret.put("rt_spo2_count", realtimeSpo2Samples.size)
+                ret.put("rt_hrv_count", realtimeHrvSamples.size)
                 ret.put("fw_version", firmwareRev ?: "")
+                ret.put("history_enabled", historyEnabled)
+                ret.put("debug_raw_enabled", debugRawEnabled)
                 c.resolve(ret)
                 pendingSyncCall = null
             }
             notifyListeners("syncEnd", JSObject().apply { put("type", "all") })
         }
+    }
+
+    private fun flushRealtimeBatch(type: String, samples: MutableList<JSObject>) {
+        if (samples.isEmpty()) return
+        val arr = JSArray(); samples.forEach { arr.put(it) }
+        val ev = JSObject(); ev.put("type", type); ev.put("samples", arr)
+        notifyListeners("syncData", ev)
+        notifyListeners("syncEnd", JSObject().apply { put("type", type) })
+        samples.clear()
     }
 
     @PluginMethod
@@ -391,13 +478,22 @@ class QRingPlugin : Plugin() {
                 return
             }
         }
+        sendRealtime(subType)
+        call.resolve(JSObject().apply { put("started", true) })
+    }
+
+    /**
+     * Start realtime stream for a single biomarker type (0x69 request).
+     * Ring emits periodic readings for ~10s, then auto-stops. Caller is
+     * responsible for capturing values via notify parser.
+     */
+    private fun sendRealtime(type: Byte) {
         val pkt = ByteArray(PACKET_SIZE)
         pkt[0] = CMD_REALTIME
-        pkt[1] = subType
+        pkt[1] = type
         pkt[2] = 0x01
         pkt[15] = checksum(pkt)
         queueWrite(pkt)
-        call.resolve(JSObject().apply { put("started", true) })
     }
 
     // =============================================================
@@ -479,12 +575,28 @@ class QRingPlugin : Plugin() {
                 connectCall = null
                 return
             }
-            // Enable notify on TX characteristic
+            // Enable notify on V1 TX characteristic
             g.setCharacteristicNotification(notifyChar, true)
-            val cccd = notifyChar!!.getDescriptor(CCCD_UUID)
-            if (cccd != null) {
+            notifyChar!!.getDescriptor(CCCD_UUID)?.let { cccd ->
                 queueWriteDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
             }
+
+            // V2 "big data" service (R09 temperature). Absent on older rings — harmless.
+            val serviceV2 = g.getService(SERVICE_UUID_V2)
+            if (serviceV2 != null) {
+                writeCharV2 = serviceV2.getCharacteristic(WRITE_UUID_V2)
+                notifyCharV2 = serviceV2.getCharacteristic(NOTIFY_UUID_V2)
+                if (notifyCharV2 != null) {
+                    g.setCharacteristicNotification(notifyCharV2, true)
+                    notifyCharV2!!.getDescriptor(CCCD_UUID)?.let { cccd ->
+                        queueWriteDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                    }
+                    Log.d(TAG, "V2 temperature service subscribed")
+                }
+            } else {
+                Log.d(TAG, "V2 service not present — temperature history unavailable for this ring")
+            }
+
             // Read firmware revision (for HRV feature flag)
             val infoService = g.getService(DEVICE_INFO_SERVICE)
             val fwChar = infoService?.getCharacteristic(FIRMWARE_REV_UUID)
@@ -517,7 +629,7 @@ class QRingPlugin : Plugin() {
         @Suppress("DEPRECATION")
         override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
             val value = characteristic.value ?: return
-            handleNotify(value)
+            routeNotify(characteristic, value)
         }
 
         override fun onCharacteristicChanged(
@@ -525,7 +637,7 @@ class QRingPlugin : Plugin() {
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray,
         ) {
-            handleNotify(value)
+            routeNotify(characteristic, value)
         }
 
         override fun onCharacteristicWrite(
@@ -607,6 +719,30 @@ class QRingPlugin : Plugin() {
                         wc.value = op.bytes
                         @Suppress("DEPRECATION")
                         wc.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                        @Suppress("DEPRECATION")
+                        g.writeCharacteristic(wc)
+                    }
+                }
+                is BleOp.WriteCharV2 -> {
+                    val wc = writeCharV2
+                    if (wc == null) {
+                        Log.w(TAG, "WriteCharV2 but writeCharV2 is null — dropping op")
+                        opInFlight = false
+                        drainQueue()
+                        return
+                    }
+                    val writeType = if ((wc.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0) {
+                        BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                    } else {
+                        BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        g.writeCharacteristic(wc, op.bytes, writeType)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        wc.value = op.bytes
+                        @Suppress("DEPRECATION")
+                        wc.writeType = writeType
                         @Suppress("DEPRECATION")
                         g.writeCharacteristic(wc)
                     }
@@ -738,6 +874,45 @@ class QRingPlugin : Plugin() {
         queueWrite(pkt)
     }
 
+    /**
+     * Enable/disable automatic temperature measurement on the ring (V1, 0x3A).
+     * Without this, the ring won't log temperature and history request returns empty.
+     */
+    private fun sendTemperaturePref(enable: Boolean) {
+        val pkt = ByteArray(PACKET_SIZE)
+        pkt[0] = CMD_AUTO_TEMP_PREF
+        pkt[1] = 0x03                       // length of subcommand section
+        pkt[2] = 0x02                       // PREF_WRITE (0x01=read)
+        pkt[3] = if (enable) 0x01 else 0x00
+        pkt[15] = checksum(pkt)
+        queueWrite(pkt)
+    }
+
+    /**
+     * Request temperature history via V2 "big data" channel.
+     * Packet: raw 7 bytes (no pad, no checksum) written to CHARACTERISTIC_COMMAND_V2.
+     * Response arrives on CHARACTERISTIC_NOTIFY_V2, possibly spanning multiple packets.
+     */
+    private fun sendTemperatureHistoryRequest() {
+        if (writeCharV2 == null || gatt == null) {
+            Log.d(TAG, "skip temperature history — V2 write char not available")
+            return
+        }
+        val pkt = byteArrayOf(
+            CMD_BIG_DATA_V2,                    // 0xBC
+            BIG_DATA_TYPE_TEMP,                 // 0x25
+            0x01, 0x00,                         // length LE = 1
+            0x3E, 0x81.toByte(), 0x02            // payload
+        )
+        queueWriteV2(pkt)
+    }
+
+    @Synchronized
+    private fun queueWriteV2(bytes: ByteArray) {
+        opQueue.addLast(BleOp.WriteCharV2(bytes))
+        drainQueue()
+    }
+
     private fun isHrvSupported(): Boolean {
         val fw = firmwareRev ?: return false
         // Parse "3.00.10" or similar → tuple
@@ -751,25 +926,171 @@ class QRingPlugin : Plugin() {
     //  Notify packet parser
     // =============================================================
 
+    /**
+     * Route a notification to the right handler based on which characteristic
+     * emitted it. V1 = Nordic-UART-like 16-byte packets. V2 = big-data raw
+     * variable-length packets (temperature on R09).
+     */
+    private fun routeNotify(characteristic: BluetoothGattCharacteristic, bytes: ByteArray) {
+        if (characteristic.uuid == NOTIFY_UUID_V2) {
+            handleNotifyV2(bytes)
+        } else {
+            handleNotify(bytes)
+        }
+    }
+
     private fun handleNotify(bytes: ByteArray) {
         if (bytes.size < 2) return
+        val hex = bytes.toHex()
+        Log.d(TAG, "NOTIFY V1 $hex")
+
+        // Capture every V1 notify as debug_raw for reverse engineering
+        emitDebugRaw("v1", hex)
+
         val cmd = bytes[0]
         try {
+            // Always parse lightweight / well-known commands
             when (cmd) {
-                CMD_BATTERY     -> parseBattery(bytes)
-                CMD_HR_HISTORY  -> parseHrHistory(bytes)
-                CMD_HR_SETTINGS -> Log.d(TAG, "hr-settings ack: ${bytes.toHex()}")
-                CMD_STEPS_HIST  -> parseStepsHistory(bytes)
-                CMD_SLEEP_HIST  -> parseSleepHistory(bytes)
-                CMD_SPO2_HISTORY -> parseSpo2History(bytes)
-                CMD_STRESS_HIST -> parseStressHistory(bytes)
-                CMD_HRV_HISTORY -> parseHrvHistory(bytes)
-                CMD_REALTIME    -> parseRealtime(bytes)
-                CMD_SET_TIME    -> Log.d(TAG, "set-time ack")
-                else -> Log.d(TAG, "unhandled cmd 0x${String.format("%02X", cmd)}: ${bytes.toHex()}")
+                CMD_BATTERY           -> { parseBattery(bytes); return }
+                CMD_HR_SETTINGS       -> { Log.d(TAG, "hr-settings ack"); return }
+                CMD_SET_TIME          -> { Log.d(TAG, "set-time ack"); return }
+                CMD_AUTO_TEMP_PREF    -> { Log.d(TAG, "auto-temp pref ack: ${bytes.toHex()}"); return }
+                CMD_REALTIME          -> { parseRealtime(bytes); return }
+            }
+
+            // History parsers are gated — their R09 outputs are garbage until rewritten.
+            // debug_raw still captures the bytes for later analysis.
+            if (historyEnabled) {
+                when (cmd) {
+                    CMD_HR_HISTORY    -> parseHrHistory(bytes)
+                    CMD_STEPS_HIST    -> parseStepsHistory(bytes)
+                    CMD_SLEEP_HIST    -> parseSleepHistory(bytes)
+                    CMD_SPO2_HISTORY  -> parseSpo2History(bytes)
+                    CMD_STRESS_HIST   -> parseStressHistory(bytes)
+                    CMD_HRV_HISTORY   -> parseHrvHistory(bytes)
+                    else -> Log.d(TAG, "unhandled cmd 0x${String.format("%02X", cmd)}: ${bytes.toHex()}")
+                }
+            } else {
+                Log.d(TAG, "cmd 0x${String.format("%02X", cmd)} gated off (historyEnabled=false)")
             }
         } catch (t: Throwable) {
             Log.e(TAG, "parse error on cmd 0x${String.format("%02X", cmd)}: ${t.message}")
+        }
+    }
+
+    /**
+     * Handle V2 "big data" notification. V2 responses can span multiple packets;
+     * we assemble until the declared payload length is reached, then parse.
+     */
+    private fun handleNotifyV2(bytes: ByteArray) {
+        if (bytes.isEmpty()) return
+        val hex = bytes.toHex()
+        Log.d(TAG, "NOTIFY V2 $hex")
+
+        // Always capture for reverse engineering
+        emitDebugRaw("v2", hex)
+
+        // V2 header: BC <type> <len_lo> <len_hi> <?> <?> <payload...>
+        if (bytes.size >= 4 && bytes[0] == CMD_BIG_DATA_V2 && bytes[1] == BIG_DATA_TYPE_TEMP) {
+            tempBuffer = bytes.copyOf()
+            tempExpectedLength = (bytes[2].toInt() and 0xFF) or ((bytes[3].toInt() and 0xFF) shl 8)
+            Log.d(TAG, "V2 temp response start — declared length $tempExpectedLength, received ${bytes.size} so far")
+        } else if (tempExpectedLength > 0) {
+            tempBuffer += bytes
+        } else {
+            Log.d(TAG, "V2 unknown framing (no active temp transfer)")
+            return
+        }
+
+        if (tempBuffer.size >= 6 + tempExpectedLength) {
+            try {
+                parseTemperatureV2(tempBuffer)
+            } catch (t: Throwable) {
+                Log.e(TAG, "V2 temperature parse error: ${t.message}")
+            }
+            tempBuffer = ByteArray(0)
+            tempExpectedLength = -1
+        }
+    }
+
+    /**
+     * Parse assembled V2 temperature payload.
+     * Layout: BC 25 <len_lo> <len_hi> <?> <?>  (6-byte header) followed by
+     * repeating day blocks: 1 byte days_ago + 1 byte separator (0x1E) + 48 bytes
+     * (24 hours x 2 half-hour samples). temp_celsius = (unsigned_byte / 10) + 20.
+     * A value of 0 means "no sample".
+     */
+    private fun parseTemperatureV2(data: ByteArray) {
+        if (data.size < 6) return
+        val length = (data[2].toInt() and 0xFF) or ((data[3].toInt() and 0xFF) shl 8)
+        Log.d(TAG, "parsing V2 temperature — length $length, buffer ${data.size}")
+        var index = 6
+
+        val cal = Calendar.getInstance()
+        cal.set(Calendar.HOUR_OF_DAY, 0)
+        cal.set(Calendar.MINUTE, 0)
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+        val todayStartMs = cal.timeInMillis
+
+        while (index < data.size && index - 6 < length) {
+            val daysAgo = data[index].toInt() and 0xFF; index++
+            if (daysAgo == 0 && index > 7) break   // end-of-stream sentinel
+            if (index < data.size) index++          // skip separator 0x1E
+            val dayStartMs = todayStartMs - daysAgo * 86_400_000L
+
+            for (slot in 0 until 48) {
+                if (index >= data.size) break
+                val rawByte = data[index].toInt() and 0xFF; index++
+                if (rawByte == 0) continue
+                val celsius = (rawByte / 10.0) + 20.0
+                if (celsius < 15.0 || celsius > 45.0) continue
+                val tsMs = dayStartMs + slot * 30L * 60L * 1000L
+                val sample = JSObject()
+                sample.put("type", "temp")
+                sample.put("ts", tsMs.toDouble())
+                sample.put("value", celsius)
+                tempSamples.add(sample)
+            }
+        }
+
+        if (tempSamples.isNotEmpty()) {
+            val arr = JSArray(); tempSamples.forEach { arr.put(it) }
+            val ev = JSObject(); ev.put("type", "temp"); ev.put("samples", arr)
+            notifyListeners("syncData", ev)
+            notifyListeners("syncEnd", JSObject().apply { put("type", "temp") })
+            Log.d(TAG, "emitted ${tempSamples.size} temperature samples")
+            tempSamples.clear()
+        } else {
+            Log.d(TAG, "V2 temperature parse yielded 0 samples")
+        }
+    }
+
+    /**
+     * Emit a debug_raw sample for every notify (V1 + V2). Batched internally —
+     * flushed when buffer reaches 20 samples or at sync end.
+     */
+    private fun emitDebugRaw(channel: String, hex: String) {
+        if (!debugRawEnabled) return
+        val obj = JSObject()
+        obj.put("type", "debug_raw")
+        obj.put("ts", nowMsUnique())
+        obj.put("raw", hex)
+        obj.put("channel", channel)  // "v1" or "v2"
+        debugRawSamples.add(obj)
+        if (debugRawSamples.size >= 20) {
+            flushDebugRawBatch(force = false)
+        }
+    }
+
+    private fun flushDebugRawBatch(force: Boolean) {
+        if (debugRawSamples.isEmpty()) return
+        val arr = JSArray(); debugRawSamples.forEach { arr.put(it) }
+        val ev = JSObject(); ev.put("type", "debug_raw"); ev.put("samples", arr)
+        notifyListeners("syncData", ev)
+        debugRawSamples.clear()
+        if (force) {
+            notifyListeners("syncEnd", JSObject().apply { put("type", "debug_raw") })
         }
     }
 
@@ -971,22 +1292,41 @@ class QRingPlugin : Plugin() {
     }
 
     private fun parseRealtime(b: ByteArray) {
+        if (b.size < 3) return
         val type = b[1].toInt() and 0xFF
         val v = b[2].toInt() and 0xFF
-        val ev = JSObject()
+
+        // Skip "no reading" sentinels (0 or status codes)
+        if (v == 0) return
+
+        val now = nowMsUnique()
+        val realtimeEv = JSObject()
+
         when (type) {
             RT_TYPE_HR.toInt() and 0xFF -> {
-                ev.put("type", "hr_realtime"); ev.put("value", v)
+                if (v !in 30..220) return
+                val s = JSObject()
+                s.put("type", "hr"); s.put("ts", now); s.put("value", v)
+                realtimeHrSamples.add(s)
+                realtimeEv.put("type", "hr_realtime"); realtimeEv.put("value", v)
             }
             RT_TYPE_SPO2.toInt() and 0xFF -> {
-                ev.put("type", "spo2_realtime"); ev.put("value", v)
+                if (v !in 70..100) return
+                val s = JSObject()
+                s.put("type", "spo2"); s.put("ts", now); s.put("value", v)
+                realtimeSpo2Samples.add(s)
+                realtimeEv.put("type", "spo2_realtime"); realtimeEv.put("value", v)
             }
             RT_TYPE_HRV.toInt() and 0xFF -> {
-                ev.put("type", "hrv_realtime"); ev.put("value", v)
+                if (v !in 5..250) return
+                val s = JSObject()
+                s.put("type", "hrv"); s.put("ts", now); s.put("value", v)
+                realtimeHrvSamples.add(s)
+                realtimeEv.put("type", "hrv_realtime"); realtimeEv.put("value", v)
             }
             else -> return
         }
-        notifyListeners("realtime", ev)
+        notifyListeners("realtime", realtimeEv)
     }
 
     private fun emitError(code: String, message: String) {

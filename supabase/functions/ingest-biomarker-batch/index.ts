@@ -30,12 +30,14 @@ async function computeRawHash(
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** Allowed biomarker types (core + V5 extended) */
+/** Allowed biomarker types (core + V5 extended + QRing extras + debug) */
 const ALLOWED_TYPES = new Set([
-  // Core (X3 + J5Vital)
-  'sleep', 'hrv', 'spo2', 'temp', 'steps', 'hr',
+  // Core (X3 + J5Vital + QRing)
+  'sleep', 'hrv', 'spo2', 'temp', 'steps', 'hr', 'rhr', 'stress',
   // V5 extended
   'ecg_history', 'ecg_raw', 'ppg', 'ppi', 'rr_interval',
+  // Debug / reverse-engineering capture (raw BLE notify dumps from QRing BLE)
+  'debug_raw',
 ]);
 
 /** Max payload_json size per sample (bytes) — prevents ECG raw floods */
