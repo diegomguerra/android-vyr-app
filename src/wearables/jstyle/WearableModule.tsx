@@ -6,7 +6,7 @@
 import { useState, useEffect } from 'react';
 import { Bluetooth, Loader2, RefreshCw, Check, AlertCircle, Unplug, Info, Watch, Circle } from 'lucide-react';
 import { wearableStore } from './wearable.store';
-import { flushSamplesToBackend } from './wearable.sync';
+import { flushSamplesToBackend, rememberPairedWearable, forgetPairedWearable } from './wearable.sync';
 import { isDebugEnabled } from './wearable.telemetry';
 import type { BiomarkerType, WearableModel } from './wearable.types';
 import { toast } from 'sonner';
@@ -48,9 +48,18 @@ export default function WearableModule() {
   const handleScan = () => isScanning ? wearableStore.stopScan() : wearableStore.scan();
   const handleConnect = async (id: string) => {
     const ok = await wearableStore.connect(id);
-    if (!ok) toast.error('Falha ao conectar ao dispositivo');
+    if (!ok) {
+      toast.error('Falha ao conectar ao dispositivo');
+      return;
+    }
+    const device = wearableStore.getState().connectedDevice;
+    // Persist so admin-triggered syncs can reconnect without user intervention
+    rememberPairedWearable(id, wearableStore.getState().selectedModel, device?.name);
   };
-  const handleDisconnect = () => wearableStore.disconnect();
+  const handleDisconnect = async () => {
+    forgetPairedWearable();
+    await wearableStore.disconnect();
+  };
 
   const modelLabel =
     selectedModel === 'J5Vital' ? 'J-Style J5Vital'

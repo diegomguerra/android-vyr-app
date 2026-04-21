@@ -11,6 +11,7 @@ import {
 import { getPlatform } from '@/lib/health-provider';
 import { supabase } from '@/integrations/supabase/client';
 import { registerPushToken, setupPushSyncHandler, unregisterPushToken } from '@/lib/push-sync';
+import { runWearableSyncIfPaired } from '@/wearables/jstyle/wearable.sync';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
 /**
@@ -162,23 +163,53 @@ export function useHealthSync() {
       .eq('id', commandId);
 
     try {
-      // Force a full sync (bypass throttle for admin-triggered syncs)
+      // 1. Force a full Health Connect sync (bypass throttle for admin-triggered syncs)
       lastSyncRef.current = 0;
-      const ok = await syncHealthKitData();
+      const healthKitOk = await syncHealthKitData();
+
+      // 2. Wearable sync (JStyle X3/V5 or QRing) — best-effort
+      let wearableSummary: Awaited<ReturnType<typeof runWearableSyncIfPaired>> = { ran: false };
+      try {
+        wearableSummary = await runWearableSyncIfPaired();
+        console.info('[health-sync] Wearable sync summary:', wearableSummary);
+      } catch (e: any) {
+        console.warn('[health-sync] Wearable sync threw (non-fatal):', e);
+        wearableSummary = { ran: true, reason: 'exception', inserted: 0, duplicates: 0, errors: 1 };
+      }
+
+      // 3. Recompute VYR state from ring_daily_data (includes fresh wearable samples).
+      // vyr-compute-state edge function reads the latest ring_daily_data and writes computed_states.
+      let vyrRecomputed = false;
+      if (wearableSummary.ran && (wearableSummary.inserted ?? 0) > 0) {
+        try {
+          const { error: computeErr } = await supabase.functions.invoke('vyr-compute-state', { body: {} });
+          if (!computeErr) vyrRecomputed = true;
+          else console.warn('[health-sync] vyr-compute-state failed:', computeErr.message);
+        } catch (e: any) {
+          console.warn('[health-sync] vyr-compute-state threw (non-fatal):', e);
+        }
+      }
+
+      const overallOk = healthKitOk;
 
       await supabase
         .from('sync_commands')
         .update({
-          status: ok ? 'completed' : 'failed',
+          status: overallOk ? 'completed' : 'failed',
           updated_at: new Date().toISOString(),
           completed_at: new Date().toISOString(),
-          result: ok
-            ? { synced_at: new Date().toISOString(), source: 'health_connect' }
-            : { error: 'syncHealthKitData returned false' },
+          result: {
+            synced_at: new Date().toISOString(),
+            source: 'health_connect',
+            healthkit_ok: healthKitOk,
+            wearable: wearableSummary,
+            vyr_recomputed: vyrRecomputed,
+          },
         })
         .eq('id', commandId);
 
-      console.info('[health-sync] Remote sync', ok ? 'completed' : 'failed');
+      console.info('[health-sync] Remote sync', overallOk ? 'completed' : 'failed',
+        '— wearable ran:', wearableSummary.ran, 'VYR recomputed:', vyrRecomputed);
     } catch (e: any) {
       console.error('[health-sync] Remote sync error:', e);
       await supabase
