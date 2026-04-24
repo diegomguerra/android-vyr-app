@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
+import { App as CapApp } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { requireValidUserId, retryOnAuthErrorLabeled } from '@/lib/auth-session';
@@ -93,6 +95,20 @@ export function useVYRStore() {
     // Only allow health sync after onboarding — prevents orphan biomarker rows
     // from users who signed up but never completed participantes setup.
     const onboardingDone = (nameRes.data as any)?.onboarding_completo === true;
+
+    // Report app version to participantes (fire-and-forget)
+    if (Capacitor.isNativePlatform()) {
+      CapApp.getInfo().then(info => {
+        const ver = `${info.version}(${info.build})`;
+        supabase.from('participantes')
+          .update({ app_version: ver })
+          .eq('user_id', userId)
+          .then(({ error }) => {
+            if (error) console.warn('[store] app_version update failed:', error.message);
+            else console.info('[store] app_version reported:', ver);
+          });
+      }).catch(() => {});
+    }
 
     // History
     if (statesRes.data && statesRes.data.length > 0) {
